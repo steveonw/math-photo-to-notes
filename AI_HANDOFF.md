@@ -1179,6 +1179,11 @@ Diagnostics should remain action-oriented.
 57. external-review package IDs/expected page IDs being lost across project Save/Open.
 58. pending imported proposals disappearing when the review panel is closed.
 59. accepting an unchanged external proposal unnecessarily forcing Needs Reapproval.
+60. JSON external-review returns silently turning LaTeX commands into control characters (for example \frac → form feed, \theta → tab, \neq → newline).
+61. invalid single-backslash LaTeX JSON failing with a vague generic parse error instead of a math-specific safety message.
+62. Clear all deleting long-term Good-page reliability evidence.
+63. opening a project replacing rather than merging the browser-global reliability ledger.
+64. external-review workflow being ZIP-only when a chat client needs loose source images to force visual inspection.
 
 ---
 
@@ -1257,6 +1262,18 @@ The default user story is:
 - rejected proposals preserve text and record rejection provenance
 - external AI never controls application classification or approval
 - browser CI covers package contract, tolerant import, diff, accept, reject, and approval lineage
+
+### Release C hardening after adversarial review — implemented 2026-09-30
+- preferred outside-AI return format changed from JSON to literal delimited PAGE blocks
+- `return-template.txt` is primary; JSON is fallback only
+- literal LaTeX backslashes are preserved in the block parser
+- unsafe single-backslash LaTeX commands in JSON are rejected before JSON.parse can silently reinterpret them
+- CI regression covers `\\frac`, `\\beta`, `\\theta`, `\\neq`, and `\\sqrt`
+- IndexedDB upgraded to version 2 with separate `reliability` store
+- global spot-check ledger survives Clear all and reload
+- project ledger snapshots merge into global evidence instead of replacing it
+- external review export supports ZIP or Loose images + text
+- Loose mode is intended for direct multi-file chat upload testing; ZIP remains the reproducible archive format
 
 ### Release D — High Assurance Math — next active release
 - deterministic math-heavy triggers
