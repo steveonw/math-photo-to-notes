@@ -1544,6 +1544,81 @@ function snapForQueueJob(job,plan){
  const pass=job?.pass||plan?.pass||'primary';
  return state.queueRuntimeSnaps?.[pass]||snapForChoice(pass);
 }
+function regionPrompt(basePrompt,region){
+ const anchor=region?.anchor?.text?('\nThe linked page transcription currently says: '+region.anchor.text):'';
+ return 'Transcribe ONLY the selected image crop. It may be one equation or a small text passage. Preserve mathematical structure exactly. Return only the transcription of the crop, with no explanation or summary. If any math symbol/operator/exponent/subscript/radical/bound/fraction/structure is uncertain, use the existing [MATH_UNSURE: seen="..." guess="..." note="..."] (I think it says: ...) format. If ordinary text is unreadable, use [unclear]. '+(region?.note?'Reviewer note: '+region.note+'. ':'')+anchor+'\n\nGeneral transcription rules for this project:\n'+String(basePrompt||'');
+}
+function latestRegionResult(region,pass){
+ const xs=(region?.results||[]).filter(r=>r.pass===pass);return xs.length?xs[xs.length-1]:null;
+}
+function updateRegionDisagreement(page,region){
+ const p=latestRegionResult(region,'primary'),s=latestRegionResult(region,'secondary');
+ if(!p||!s){region.disagreement=false;region.comparison=null;return}
+ const equal=normalizeRegionText(p.repairedText||p.rawText)===normalizeRegionText(s.repairedText||s.rawText);
+ region.disagreement=!equal;
+ region.comparison={at:new Date().toISOString(),primaryResultId:p.id,secondaryResultId:s.id,equal};
+ if(!equal){
+   region.events=region.events||[];
+   region.events.push({action:'disagreement',at:new Date().toISOString(),note:'Latest Primary and Secondary targeted results differ; no result was selected automatically.'});
+   if(page.classification==='approved')markNeedsReapproval(page,'Targeted Primary/Secondary comparison disagreed after approval; human reapproval is required.');
+   else if(page.classification!=='needsrefresh'&&page.classification!=='needsreapproval'){
+     page.classification='review';page.status='done';page.reason='Targeted Primary/Secondary results disagree; human review is required.';
+   }
+ }
+}
+async function runRegionPass(pageId,regionId,pass,options={}){
+ const page=state.items.find(x=>x.id===pageId),region=page?.regions?.find(x=>x.id===regionId);if(!page||!region)return null;
+ if(state.queuePlan||state.running){if(!options.silent)alert('Finish or cancel the whole-page batch queue before running targeted region AI.');return null}
+ if(!options.allowConcurrent&&state.activeControllers.size){if(!options.silent)alert('Another AI request is already running.');return null}
+ const snap=snapForChoice(pass),msg=snapValidationMessage(snap);if(msg){if(!options.silent)alert(msg);return null}
+ let crop=region.cropDataUrl;
+ try{if(!crop){crop=await cropRegionData(page,region);region.cropDataUrl=crop;region.cropHash=await sha256Hex(crop)}}catch(e){region.lastError=e instanceof Error?e.message:String(e);scheduleAutosave();render();return null}
+ const key='region:'+pageId+':'+regionId+':'+pass+':'+(crypto.randomUUID?crypto.randomUUID():Date.now());
+ const controller=new AbortController();state.activeControllers.set(key,controller);
+ region.runningPasses=region.runningPasses||[];if(!region.runningPasses.includes(pass))region.runningPasses.push(pass);region.lastError='';render();
+ const targeted={...snap,prompt:regionPrompt(snap.prompt,region)};
+ const temp={file:dataUrlToFile(crop,'region-'+regionId+'.jpg'),imageData:crop};
+ try{
+   let result=null,retryIndex=0;
+   while(true){
+     try{result=await transcribeWithTimeout(temp,targeted,controller.signal);break}
+     catch(e){
+       if(controller.signal.aborted)throw controller.signal.reason||new DOMException('Cancelled','AbortError');
+       if(!isTransientError(e)||retryIndex>=MAX_TRANSIENT_RETRIES)throw e;
+       const delay=transientDelayMs(e,retryIndex);retryIndex++;
+       region.events=region.events||[];region.events.push({action:'transient-retry',at:new Date().toISOString(),pass,provider:snap.provider,model:snap.model,note:'Temporary targeted-region failure; retry '+retryIndex+' after '+Math.ceil(delay/1000)+'s.'});
+       scheduleAutosave();await sleepWithSignal(delay,controller.signal);
+     }
+   }
+   const repaired=repairLatexForMathJax(result.text),quality=regionQuality(repaired.text);
+   const rec={
+     id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random(),at:new Date().toISOString(),pass,
+     provider:snap.provider,model:snap.model,rawText:result.text,repairedText:repaired.text,repairs:repaired.repairs,
+     validationWarnings:latexStructuralWarnings(repaired.text),quality:quality.classification,qualityReason:quality.reason,
+     truncated:!!result.truncated,stopReason:result.stopReason||'',usage:result.usage||null,cropHash:region.cropHash||'',
+     sourcePageTextHash:await sha256Hex(page.finalText||page.text||'')
+   };
+   region.results=region.results||[];region.results.push(rec);if(region.results.length>20)region.results.shift();
+   region.events=region.events||[];region.events.push({action:'completed',at:rec.at,pass,provider:snap.provider,model:snap.model,note:'Targeted crop transcription completed. '+quality.reason});
+   updateRegionDisagreement(page,region);scheduleAutosave();render();return rec;
+ }catch(e){
+   if(e?.name!=='AbortError')region.lastError=e instanceof Error?e.message:String(e);
+   region.events=region.events||[];region.events.push({action:e?.name==='AbortError'?'cancelled':'failed',at:new Date().toISOString(),pass,provider:snap.provider,model:snap.model,note:e instanceof Error?e.message:String(e)});
+   scheduleAutosave();render();return null;
+ }finally{
+   state.activeControllers.delete(key);region.runningPasses=(region.runningPasses||[]).filter(x=>x!==pass);scheduleAutosave();render();
+ }
+}
+window.runRegionPass=(pageId,regionId,pass)=>runRegionPass(pageId,regionId,pass);
+window.runRegionComparison=async(pageId,regionId)=>{
+ if(state.queuePlan||state.running||state.activeControllers.size){alert('Finish other AI work before comparing a targeted region.');return}
+ const p=snapPrimary(),s=snapSecondary();if(!validateSnap(p)||!validateSnap(s))return;
+ await Promise.all([
+   runRegionPass(pageId,regionId,'primary',{allowConcurrent:true,silent:true}),
+   runRegionPass(pageId,regionId,'secondary',{allowConcurrent:true,silent:true})
+ ]);
+ const page=state.items.find(x=>x.id===pageId),region=page?.regions?.find(x=>x.id===regionId);if(page&&region){updateRegionDisagreement(page,region);scheduleAutosave();render()}
+};
 
 async function runOne(i,s,{forceFresh=false}={}){
  if(i.classification==='approved')return {outcome:'skipped'};
@@ -1849,6 +1924,11 @@ async function runA2SelfTests(){
  test('auto route protects Approved state',/protected/.test(autoRouteGuardReason({classification:'approved',primaryAttempts:1,secondaryAttempts:0,routingHistory:[]},'review','secondary','primary',3)));
  test('same-provider auth failure is not auto-routable',eligibleAutomaticFailure({lastFailureStatus:401,lastError:'Unauthorized'},'primary','primary')===false);
  test('auth failure may switch to alternate AI slot',eligibleAutomaticFailure({lastFailureStatus:401,lastError:'Unauthorized'},'secondary','primary')===true);
+ const depPage={classification:'good',reason:'ok',status:'done',needsRefresh:false,needsReapproval:false,regions:[]};
+ const depRegion={anchor:{start:0,end:3,text:'old',detached:false},results:[{id:'r1',rawText:'new',repairedText:'new'}],preferredResultId:'r1',needsRefresh:false};
+ depPage.regions=[depRegion];markNeedsRefresh(depPage,depRegion,'test');
+ test('targeted result can mark Needs Refresh without changing text',depPage.classification==='needsrefresh'&&depRegion.needsRefresh===true);
+ test('region disagreement comparison is conservative',normalizeRegionText('x + 1')!==normalizeRegionText('x - 1'));
  return {passed:tests.filter(x=>x.ok).length,total:tests.length,tests};
 }
 
@@ -1874,6 +1954,8 @@ async function runDoctor(){
    ['Durable queue',state.queuePlan?(state.queuePaused?'Paused / resumable':'Active'):'Idle'],
    ['Cached results',String(cacheCount)],
    ['Interrupted jobs',String(interrupted)],
+   ['Targeted regions',String(state.items.reduce((n,i)=>n+(i.regions?.length||0),0))],
+   ['Needs Refresh pages',String(state.items.filter(i=>i.classification==='needsrefresh'||i.needsRefresh).length)],
    ['Self-tests',selfTests.passed+'/'+selfTests.total+' passed'],
    ['Primary',p.provider+' / '+(p.model||'(model missing)')],
    ['Primary key',p.apiKey?'Present (not stored)':'Missing'],
