@@ -956,19 +956,63 @@ Avoid autonomous multi-agent orchestration where deterministic application logic
 
 ---
 
+# Current Implementation Snapshot
+
+As of 2026-09-30, Upgrades 1–6 are implemented or substantially implemented in `photo_to_text.html`.
+
+Current architecture includes:
+
+- raw / repaired / final transcription lineage
+- Approved and Needs Reapproval states
+- IndexedDB persistence with lightweight localStorage fallback
+- v1 project schema
+- provider capability diagnostics
+- attempt IDs, cancellation, stale-response protection, and timeout handling
+- SHA-256 image/process fingerprints
+- exact-result cache
+- live MathJax preview and structured deterministic math validation
+- Guided Review with zoom/fit/rotation and keyboard shortcuts
+- persistent anchored review flags
+- durable ordered queue
+- configurable 1–6 request concurrency
+- pause/resume/cancel
+- transient 429/5xx/network/timeout retries with Retry-After and exponential backoff
+
+The next active development target is **Upgrade 7 — Document Organization + Page Ordering**.
+
+---
+
 # PART 15 — Recommended Build Order
 
 ### Upgrade 1 — Phase A
 Approved state + revision history + raw/repaired/final text + truncation detection + retry counters + safer validator + baseline autosave.
 
+**Status:** Implemented on 2026-09-30.
+
 ### Upgrade 2 — Phase A2
 Versioned project schema + IndexedDB + recovery/migrations + provider capability registry + Doctor diagnostics.
+
+**Status:** Core implementation completed on 2026-09-30.
+
+Implemented: v1 project envelope, IndexedDB project/image storage, localStorage fallback, recovery handling, provider capability registry, Doctor diagnostics, image/process hashing groundwork, and cache storage.
+
+Still expected in later hardening: explicit future schema migrations and a larger checked-in regression fixture corpus.
 
 ### Upgrade 3 — Phase A2 continuation
 Request IDs + timeout/cancellation + stale-response guards + durable job states + image/process fingerprints + exact-result cache + regression self-tests.
 
+**Status:** Core implementation completed on 2026-09-30.
+
+Implemented: attempt IDs, AbortController, stale-result protection, Interrupted state, request timeout, fingerprints, exact-result cache, and initial Doctor self-tests.
+
 ### Upgrade 4
 Live MathJax preview + stronger EquationWright validation.
+
+**Status:** Implemented on 2026-09-30.
+
+Implemented capabilities include source/preview editing, on-demand MathJax rendering, structured math-warning categories, approximate source snippets, and structured Math Unsure display.
+
+**Security follow-up:** live preview currently loads MathJax on demand in the main application page. Before production hardening, consider bundling/self-hosting MathJax so a third-party remote script is not executed on a page where API keys may be entered.
 
 ### Upgrade 5
 Side-by-side guided review + anchored flags + Needs Reapproval behavior.
@@ -986,6 +1030,21 @@ Implemented capabilities include a persisted ordered queue, 1–6 configurable s
 
 ### Upgrade 7
 Document organization + page ordering.
+
+**Status:** Next active milestone.
+
+Planned scope:
+
+- persistent notebook/document groups
+- stable page ordering before and after processing
+- drag-and-drop reorder controls
+- page metadata: title, class, chapter, lecture, date, page number, tags
+- manual page-number entry plus non-destructive page-number suggestions
+- group-aware Guided Review navigation
+- ordering/group data included in autosave/project state
+- groundwork for group-based Markdown/PDF/archive export
+
+Page-number recognition must never silently reorder pages unless the user explicitly enables/accepts that behavior.
 
 ### Upgrade 8
 Automatic Primary/Secondary routing using the hardened processing engine.
