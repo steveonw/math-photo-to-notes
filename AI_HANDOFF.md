@@ -1097,6 +1097,11 @@ Diagnostics should remain action-oriented.
 43. batch completion counts being computed from the whole project instead of the run that just finished.
 44. Retry Failed blindly repeating a known same-slot authentication/configuration failure.
 45. Guided Review opened from a batch summary including unrelated pages from older runs.
+46. Good-page spot-checks silently re-sampling already checked pages by default.
+47. a human-found Good-page error leaving the page classified Good.
+48. an OK spot-check being treated as approval.
+49. spot-check evidence losing model/prompt/processing provenance across Save/Open.
+50. reliability reporting turning small human samples into an unsupported accuracy percentage.
 
 ---
 
@@ -1134,16 +1139,26 @@ The default user story is:
 - failed retry blocks known same-slot auth/configuration repeats
 - browser CI covers one-pass Quick Transcribe behavior
 
-### Release B — Good-page spot checks — next active release
-- random spot-check sample
-- OK / Error found
-- optional error categories
-- persistent reliability ledger
-- provider/model/prompt/processing provenance
-- accumulated human-reviewed counts
-- no unsupported formal accuracy percentage
+### Release B — Good-page spot checks — implemented 2026-09-30
+- random Good-page sample from the completed batch
+- selectable sample size: 1 / 5 / 10 / 20
+- previously checked Good pages excluded by default
+- persisted sample page IDs / active session
+- source image + final transcription review UI
+- Looks OK / Record error / Skip
+- structured optional error categories and notes
+- Error found moves Good → Review without rewriting transcription
+- OK never approves
+- persistent project-level reliability ledger
+- final-text hash + image hash + provider/model/pass + prompt/processing fingerprints
+- Auto-fix / High Assurance provenance
+- grouped human evidence counts by provider/model/prompt
+- direct JSON evidence export
+- archive/audit inclusion
+- browser CI covers ledger persistence and Error-found behavior
+- no formal accuracy percentage
 
-### Release C — External AI round trip
+### Release C — External AI round trip — next active release
 Export and import ship together.
 
 - chat-friendly problem-page chunks
