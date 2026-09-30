@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
 const root=path.resolve(here,'..');
+const regressionFixtures=JSON.parse(await fs.readFile(path.join(here,'fixtures','browser-regressions.json'),'utf8'));
 const host='127.0.0.1';
 const port=4173;
 
@@ -42,6 +43,7 @@ const mathResponse='The derivative of $x^2$ is $2x$, and this sentence contains 
 let anthropicResponse=mathResponse;
 let anthropicResponses=[];
 let anthropicCalls=0;
+let anthropicDelayMs=0;
 const pngBase64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQwAAAABJRU5ErkJggg==';
 
 function assert(ok,message){if(!ok)throw new Error(message)}
@@ -56,7 +58,7 @@ async function newPage(){
     body:'window.MathJax=window.MathJax||{};window.MathJax.typesetPromise=async()=>{};window.MathJax.typesetClear=()=>{};'
   }));
 
-  await page.route('https://api.anthropic.com/v1/messages',route=>{
+  await page.route('https://api.anthropic.com/v1/messages',async route=>{
     const cors={
       'access-control-allow-origin':'*',
       'access-control-allow-headers':'*',
@@ -65,6 +67,7 @@ async function newPage(){
     if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers:cors,body:''});
     anthropicCalls++;
     const responseText=anthropicResponses.length?anthropicResponses.shift():anthropicResponse;
+    if(anthropicDelayMs)await new Promise(resolve=>setTimeout(resolve,anthropicDelayMs));
     return route.fulfill({
       status:200,
       headers:{...cors,'content-type':'application/json'},
@@ -135,6 +138,25 @@ try{
     assert(repaired.sqrt==='$\\sqrt{x}$','sqrt backslash repair is wrong: '+JSON.stringify(repaired.sqrt));
     assert(repaired.theta==='$\\theta_1$','theta backslash repair is wrong: '+JSON.stringify(repaired.theta));
     assert(repaired.sin==='$\\sin(x)$','sin backslash repair is wrong: '+JSON.stringify(repaired.sin));
+
+    const corpus=await page.evaluate(fixtures=>({
+      repair:fixtures.repair.map(x=>({name:x.name,actual:repairLatexForMathJax(x.input).text,expected:x.expected})),
+      classification:fixtures.classification.map(x=>({name:x.name,actual:classifyText(x.input).classification,expected:x.expected})),
+      validation:fixtures.validation.map(x=>({name:x.name,count:latexStructuralWarnings(x.input).length,min:x.minWarnings})),
+      assurance:fixtures.assurance.map(x=>({name:x.name,actual:compareHighAssuranceTexts(x.primary,x.verifier).disagree,expected:x.disagree})),
+      pageNumber:fixtures.pageNumber.map(x=>({name:x.name,actual:suggestPageNumber(x.item)?.value||'',expected:x.expected})),
+      migration:(()=>{
+        const v1={schema:PROJECT_SCHEMA,version:1,items:[{id:'legacy',regions:[]}],queue:{jobs:[{id:'legacy',state:'running',pass:'primary'}]}};
+        const v2=prepareProjectEnvelope(v1);
+        return {version:v2.version,kind:v2.queue.jobs[0].kind,migrations:v2.migrationHistory.length};
+      })()
+    }),regressionFixtures);
+    for(const x of corpus.repair)assert(x.actual===x.expected,'Fixture repair failed '+x.name+': '+JSON.stringify(x));
+    for(const x of corpus.classification)assert(x.actual===x.expected,'Fixture classification failed '+x.name+': '+JSON.stringify(x));
+    for(const x of corpus.validation)assert(x.min===0?x.count===0:x.count>=x.min,'Fixture validation failed '+x.name+': '+JSON.stringify(x));
+    for(const x of corpus.assurance)assert(x.actual===x.expected,'Fixture assurance comparison failed '+x.name+': '+JSON.stringify(x));
+    for(const x of corpus.pageNumber)assert(x.actual===x.expected,'Fixture page-number inference failed '+x.name+': '+JSON.stringify(x));
+    assert(corpus.migration.version===2&&corpus.migration.kind==='page'&&corpus.migration.migrations===1,'Project v1 migration fixture failed: '+JSON.stringify(corpus.migration));
     await context.close();
   }
 
@@ -329,6 +351,61 @@ try{
     await context.close();
     anthropicResponses=[];
     anthropicResponse=mathResponse;
+  }
+
+  // Release E: targeted-region Primary/Secondary work is a durable queue, not an in-flight-only side path.
+  {
+    anthropicResponse=mathResponse;
+    anthropicResponses=[];
+    anthropicCalls=0;
+    anthropicDelayMs=0;
+    const {context,page}=await newPage();
+    await addFixture(page,'durable-region.png');
+    const base=await processOne(page);
+    assert(base.badge==='Good','Durable-region fixture must begin with a completed page');
+
+    await page.evaluate(()=>{
+      document.getElementById('provider2').value='anthropic';
+      document.getElementById('provider2').dispatchEvent(new Event('change',{bubbles:true}));
+      document.getElementById('model2').value='claude-region-secondary';
+      document.getElementById('apikey2').value='secondary-region-key';
+      const item=state.items[0];
+      item.regions=[{
+        id:'region-durable',note:'Durable equation check',x:0,y:0,w:1,h:1,
+        cropDataUrl:item.imageData,cropHash:'fixture-crop',anchor:null,
+        results:[],events:[],runningPasses:[],preferredResultId:'',needsRefresh:false,disagreement:false
+      }];
+      render();
+    });
+
+    anthropicCalls=0;
+    anthropicResponses=[
+      'Targeted equation $x^2+1$',
+      'Targeted equation $x^2+1$'
+    ];
+    anthropicDelayMs=350;
+    await page.evaluate(()=>runRegionComparison(state.items[0].id,'region-durable'));
+    await page.waitForFunction(()=>state.queuePlan?.kind==='region'&&state.queuePlan.jobs.some(j=>j.state==='running'),null,{timeout:5000});
+    const persisted=await page.evaluate(()=>{
+      const q=projectEnvelope(false).queue;
+      return {kind:q.kind,jobs:q.jobs.map(j=>({kind:j.kind,regionId:j.regionId,pass:j.pass,state:j.state}))};
+    });
+    assert(persisted.kind==='region'&&persisted.jobs.length===2,'Targeted comparison did not create a durable region queue: '+JSON.stringify(persisted));
+    assert(persisted.jobs.every(j=>j.kind==='region'&&j.regionId==='region-durable'&&j.state==='pending'),'Running targeted jobs did not serialize as resumable pending jobs: '+JSON.stringify(persisted));
+
+    await page.waitForFunction(()=>!state.queuePlan&&state.items[0].regions[0].results.length===2,null,{timeout:15000});
+    const done=await page.evaluate(()=>({
+      results:state.items[0].regions[0].results.map(x=>({pass:x.pass,provider:x.provider,model:x.model})),
+      queuedEvents:state.items[0].regions[0].events.filter(x=>x.action==='queued').length,
+      runningPasses:state.items[0].regions[0].runningPasses
+    }));
+    assert(anthropicCalls===2,'Durable targeted comparison should make exactly two calls, got '+anthropicCalls);
+    assert(done.results.some(x=>x.pass==='primary')&&done.results.some(x=>x.pass==='secondary'),'Durable targeted queue lost a pass: '+JSON.stringify(done));
+    assert(done.queuedEvents===2,'Durable targeted jobs did not record queue provenance');
+    assert(done.runningPasses.length===0,'Targeted running state was not cleared after queue completion');
+    anthropicDelayMs=0;
+    anthropicResponses=[];
+    await context.close();
   }
 
   // Release C: external-AI packages use stable IDs and imported proposals cannot change text before human acceptance.
