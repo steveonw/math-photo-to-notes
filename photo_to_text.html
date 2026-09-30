@@ -1309,14 +1309,16 @@ function renderBatchSummary(){
    '<div class="batch-summary-actions">'+
      '<label style="display:flex;align-items:center;gap:6px;margin:0"><span class="small">Spot-check</span><select id="summary-spotcheck-count" style="width:auto"><option value="1">1</option><option value="5" selected>5</option><option value="10">10</option><option value="20">20</option></select><button id="summary-spotcheck-good"'+(counts.good?'':' disabled')+'>Good pages</button></label>'+
      '<button id="summary-review-flagged"'+(flagged?'':' disabled')+'>Review '+flagged+' flagged page'+(flagged===1?'':'s')+'</button>'+
+     '<button id="summary-external-review"'+(externalProblemPages(summary.pageIds).length?'':' disabled')+'>Review with External AI</button>'+
      '<button id="summary-resume-interrupted"'+(interrupted?'':' disabled')+'>Resume '+interrupted+' interrupted</button>'+
      '<button id="summary-retry-failed"'+(retryableFailed?'':' disabled')+'>Retry '+retryableFailed+' failed</button>'+
      (configBlocked?'<span class="small" style="align-self:center">'+configBlocked+' failed page'+(configBlocked===1?' needs':'s need')+' configuration or a different AI choice.</span>':'')+
      '<button id="summary-export-all">Export everything</button>'+
    '</div>';
- const spot=$('summary-spotcheck-good'),review=$('summary-review-flagged'),resume=$('summary-resume-interrupted'),retry=$('summary-retry-failed'),exp=$('summary-export-all');
+ const spot=$('summary-spotcheck-good'),review=$('summary-review-flagged'),external=$('summary-external-review'),resume=$('summary-resume-interrupted'),retry=$('summary-retry-failed'),exp=$('summary-export-all');
  if(spot)spot.onclick=()=>startGoodSpotCheck(summary.pageIds,Number($('summary-spotcheck-count')?.value||5));
  if(review)review.onclick=()=>openBatchFlaggedReview(summary.pageIds);
+ if(external)external.onclick=()=>exportExternalReviewPackages(summary.pageIds);
  if(resume)resume.onclick=()=>resumeBatchInterrupted(summary.pageIds);
  if(retry)retry.onclick=()=>retryBatchFailed(summary.pageIds);
  if(exp)exp.onclick=()=>$('download-all')?.click();
@@ -2326,6 +2328,15 @@ async function runA2SelfTests(){
  test('spot-check sampling excludes previously checked Good pages',eligibleGoodSpotCheckPages(['g1','g2']).map(x=>x.id).join(',')==='g2');
  state.items=originalItems;state.spotCheckLedger=originalLedger;
  test('reliability summary uses counts, not an accuracy field',!('accuracy' in (reliabilityGroups()[0]||{})));
+ const extParsed=parseExternalCorrectionText('Commentary before\n\`\`\`json\n{"package_id":"p1","pages":[{"page_id":"x","corrected_text":"fixed"}]}\n\`\`\`\nCommentary after');
+ test('external correction parser tolerates fenced JSON and commentary',extParsed.package_id==='p1'&&extParsed.pages?.[0]?.page_id==='x');
+ const oldExports=state.externalReviewExports,oldExternalItems=state.items;
+ state.items=[{id:'x',name:'x',classification:'review',status:'done',finalText:'old',text:'old'},{id:'y',name:'y',classification:'review',status:'done',finalText:'old',text:'old'}];
+ state.externalReviewExports=[{id:'p1',pageIds:['x','y']}];
+ const normalized=normalizeExternalCorrectionPayload({package_id:'p1',pages:[{page_id:'x',corrected_text:'new',classification:'approved'},{page_id:'x',corrected_text:'duplicate'},{page_id:'z',corrected_text:'unknown'}]},'test.json');
+ test('external import matches known IDs and reports duplicate/unknown/missing',normalized.report.matched===1&&normalized.report.duplicates.length===1&&normalized.report.unknown.length===1&&normalized.report.missingExpected.join(',')==='y');
+ test('external AI classification fields do not enter proposals',!('classification' in normalized.proposals[0]));
+ state.externalReviewExports=oldExports;state.items=oldExternalItems;
  return {passed:tests.filter(x=>x.ok).length,total:tests.length,tests};
 }
 
@@ -2354,6 +2365,7 @@ async function runDoctor(){
    ['Targeted regions',String(state.items.reduce((n,i)=>n+(i.regions?.length||0),0))],
    ['Needs Refresh pages',String(state.items.filter(i=>i.classification==='needsrefresh'||i.needsRefresh).length)],
    ['Good-page spot checks',(()=>{const l=state.spotCheckLedger||[];return l.length+' checked / '+l.filter(x=>x.outcome==='error').length+' errors found'})()],
+   ['External AI review',(()=>{const p=state.externalReviewExports||[],a=state.items.reduce((n,i)=>n+(i.externalCorrections||[]).filter(x=>x.decision==='accepted').length,0),r=state.items.reduce((n,i)=>n+(i.externalCorrections||[]).filter(x=>x.decision==='rejected').length,0);return p.length+' packages / '+a+' accepted / '+r+' rejected'})()],
    ['Recorded usage',(()=>{const t=buildUsageReport(state.items).totals;return t.input+' input / '+t.output+' output tokens / est. USD '+t.estimatedCost.toFixed(4)})()],
    ['Self-tests',selfTests.passed+'/'+selfTests.total+' passed'],
    ['Primary',p.provider+' / '+(p.model||'(model missing)')],
@@ -2596,12 +2608,13 @@ function auditManifest(list=state.items){
    schema:'math-photo-notes-audit-v1',generatedAt:new Date().toISOString(),projectSchema:PROJECT_SCHEMA,
    pageCount:list.length,documentCount:state.documents.length,
    spotChecks:{total:(state.spotCheckLedger||[]).length,ok:(state.spotCheckLedger||[]).filter(x=>x.outcome==='ok').length,error:(state.spotCheckLedger||[]).filter(x=>x.outcome==='error').length},
+   externalReview:{packages:(state.externalReviewExports||[]).length,accepted:list.reduce((n,i)=>n+(i.externalCorrections||[]).filter(x=>x.decision==='accepted').length,0),rejected:list.reduce((n,i)=>n+(i.externalCorrections||[]).filter(x=>x.decision==='rejected').length,0)},
    pages:list.map(i=>({
      id:i.id,name:i.name,documentId:i.documentId||'',documentName:documentName(i.documentId),order:i.order,
      classification:i.classification,status:i.status,imageHash:i.imageHash||'',lastFingerprint:i.lastFingerprint||'',
      provider:i.lastProvider||'',model:i.lastModel||'',pass:i.lastPass||'',approvalAt:i.approvalAt||'',
      needsReapproval:!!i.needsReapproval,needsRefresh:!!i.needsRefresh,
-     revisionCount:i.history?.length||0,reviewFlagCount:i.reviewFlags?.length||0,routingEventCount:i.routingHistory?.length||0,
+     revisionCount:i.history?.length||0,reviewFlagCount:i.reviewFlags?.length||0,routingEventCount:i.routingHistory?.length||0,externalCorrectionCount:i.externalCorrections?.length||0,
      regions:(i.regions||[]).map(r=>({id:r.id,note:r.note||'',cropHash:r.cropHash||'',anchor:r.anchor||null,preferredResultId:r.preferredResultId||'',appliedResultId:r.appliedResultId||'',disagreement:!!r.disagreement,needsRefresh:!!r.needsRefresh,resultCount:r.results?.length||0,eventCount:r.events?.length||0}))
    }))
  };
@@ -2619,6 +2632,7 @@ async function archiveEntriesForPages(list,{includeProject=false}={}){
  entries.push({name:'audit-manifest.json',bytes:jsonBytes(auditManifest(list))});
  entries.push({name:'usage-report.json',bytes:jsonBytes(buildUsageReport(list))});
  entries.push({name:'spot-check-ledger.json',bytes:jsonBytes(state.spotCheckLedger||[])});
+ entries.push({name:'external-review/export-history.json',bytes:jsonBytes(state.externalReviewExports||[])});
  entries.push({name:'exports/combined.md',bytes:utf8Bytes(mdFor(list.filter(i=>i.text)))});
  entries.push({name:'exports/combined.txt',bytes:utf8Bytes(plainTextFor(list.filter(i=>i.text)))});
  entries.push({name:'exports/combined.tex',bytes:utf8Bytes(texFor(list.filter(i=>i.text)))});
@@ -2650,6 +2664,280 @@ async function archiveEntriesForPages(list,{includeProject=false}={}){
  }
  return entries;
 }
+function externalProblemPages(pageIds=null){
+ const ids=Array.isArray(pageIds)?new Set(pageIds):null;
+ const flagged=new Set(['review','mathunsure','unclear','needsreapproval','needsrefresh']);
+ return state.items.filter(i=>{
+   if(ids&&!ids.has(i.id))return false;
+   if(flagged.has(i.classification))return true;
+   if(i.classification==='failed')return !!(i.imageData||i.url||i.finalText||i.text||i.rawText);
+   return false;
+ });
+}
+function externalReviewPagePayload(i){
+ return {
+   page_id:i.id,
+   name:i.name,
+   document:documentName(i.documentId),
+   metadata:i.metadata||{},
+   current_state:i.classification,
+   reason:i.reason||'',
+   current_text:i.finalText||i.text||'',
+   raw_text:i.rawText||'',
+   validation_warnings:i.validationWarnings||[],
+   math_uncertainty:parseMathUnsureMarkers(i.finalText||i.text||'').map(x=>({seen:x.seen,guess:x.guess,note:x.note}))
+ };
+}
+function externalReviewPrompt(pkg){
+ return `You are reviewing OCR/transcription results against the included source images.
+
+Important rules:
+- Preserve each supplied page_id exactly.
+- Compare the source image to current_text and propose corrected_text only where needed.
+- Preserve wording, structure, and mathematical notation as faithfully as possible.
+- Do not summarize or stylistically rewrite unrelated content.
+- Do not hide uncertainty. If a symbol or passage is genuinely ambiguous, preserve that uncertainty in corrected_text or explain it briefly in note.
+- Do not invent page IDs.
+- Do not approve pages.
+- Do not assign application classifications, piles, confidence scores, or workflow states.
+- Return JSON only if possible. Commentary or Markdown fences are tolerated by the importer, but unnecessary.
+
+Return this shape:
+{
+  "package_id": "${pkg.id}",
+  "pages": [
+    {
+      "page_id": "copy-the-exact-page-id",
+      "corrected_text": "full proposed corrected transcription",
+      "note": "brief explanation of material changes or remaining uncertainty"
+    }
+  ]
+}
+
+Include every page in this package, even if corrected_text is unchanged.
+Package ID: ${pkg.id}
+Expected page IDs:
+${pkg.pageIds.map(x=>'- '+x).join('\n')}`;
+}
+async function buildExternalReviewPackageEntries(pkg,pages){
+ const manifest={
+   schema:'math-photo-notes-external-review-v1',
+   package_id:pkg.id,
+   created_at:pkg.createdAt,
+   expected_page_ids:[...pkg.pageIds],
+   page_count:pages.length,
+   instructions:'External AI may propose corrected text only. Application classification and approval remain human/app controlled.'
+ };
+ const entries=[
+   {name:'review-prompt.txt',bytes:utf8Bytes(externalReviewPrompt(pkg))},
+   {name:'manifest.json',bytes:jsonBytes(manifest)},
+   {name:'return-template.json',bytes:jsonBytes({package_id:pkg.id,pages:pages.map(i=>({page_id:i.id,corrected_text:i.finalText||i.text||'',note:''}))})}
+ ];
+ for(let idx=0;idx<pages.length;idx++){
+   const i=pages[idx],base='pages/'+String(idx+1).padStart(3,'0')+'-'+safeFilePart(i.id,'page')+'/';
+   entries.push({name:base+'page.json',bytes:jsonBytes(externalReviewPagePayload(i))});
+   entries.push({name:base+'current.txt',bytes:utf8Bytes(i.finalText||i.text||'')});
+   if(i.rawText)entries.push({name:base+'raw.txt',bytes:utf8Bytes(i.rawText)});
+   const image=await itemImageData(i);
+   if(image){const d=dataUrlBytes(image);entries.push({name:base+'source'+imageExtensionFromDataUrl(image,i.name),bytes:d.bytes})}
+ }
+ return entries;
+}
+async function exportExternalReviewPackages(pageIds=null){
+ if(state.running||state.activeControllers.size||state.queuePlan){alert('Finish or cancel active processing before exporting an external-AI review package.');return []}
+ const pages=externalProblemPages(pageIds);
+ if(!pages.length){alert('There are no eligible problem pages in this scope to send for external review.');return []}
+ const chunkSize=Math.max(1,Math.min(20,Number($('external-chunk-size')?.value||10)));
+ const chunks=[];for(let n=0;n<pages.length;n+=chunkSize)chunks.push(pages.slice(n,n+chunkSize));
+ const exported=[];
+ for(let n=0;n<chunks.length;n++){
+   const group=chunks[n],id='ext-'+new Date().toISOString().replace(/[-:.TZ]/g,'').slice(0,14)+'-'+String(n+1).padStart(2,'0')+'-'+Math.random().toString(36).slice(2,7);
+   const pkg={id,createdAt:new Date().toISOString(),pageIds:group.map(i=>i.id),chunkIndex:n+1,chunkCount:chunks.length,scope:Array.isArray(pageIds)?'batch':'project'};
+   state.externalReviewExports.push(pkg);if(state.externalReviewExports.length>100)state.externalReviewExports.shift();
+   const entries=await buildExternalReviewPackageEntries(pkg,group);
+   downloadBlob('external-ai-review-'+String(n+1).padStart(2,'0')+'-of-'+String(chunks.length).padStart(2,'0')+'.zip',buildStoreZip(entries));
+   exported.push(pkg);
+   if(n<chunks.length-1)await new Promise(resolve=>setTimeout(resolve,180));
+ }
+ scheduleAutosave();render();
+ if(chunks.length>1)alert('Created '+chunks.length+' external-AI review packages. Your browser may ask permission for multiple downloads.');
+ return exported;
+}
+function extractBalancedJson(text,start){
+ const open=text[start],close=open==='{'?'}':']';if(open!=='{'&&open!=='[')return '';
+ let depth=0,inString=false,escapeNext=false;
+ for(let i=start;i<text.length;i++){
+   const ch=text[i];
+   if(inString){
+     if(escapeNext){escapeNext=false;continue}
+     if(ch==='\\'){escapeNext=true;continue}
+     if(ch==='"')inString=false;
+     continue;
+   }
+   if(ch==='"'){inString=true;continue}
+   if(ch===open)depth++;
+   else if(ch===close){depth--;if(depth===0)return text.slice(start,i+1)}
+ }
+ return '';
+}
+function parseExternalCorrectionText(raw){
+ const text=String(raw||'').trim();if(!text)throw new Error('The imported response is empty.');
+ const candidates=[text];
+ const fence=/```(?:json)?\s*([\s\S]*?)```/gi;let m;while((m=fence.exec(text)))candidates.unshift(m[1].trim());
+ for(const candidate of candidates){try{return JSON.parse(candidate)}catch(e){}}
+ for(let i=0;i<text.length;i++){
+   if(text[i]!=='{'&&text[i]!=='[')continue;
+   const candidate=extractBalancedJson(text,i);if(!candidate)continue;
+   try{return JSON.parse(candidate)}catch(e){}
+ }
+ throw new Error('No valid JSON object or array was found. Ask the external AI to return the supplied JSON format.');
+}
+function normalizeExternalCorrectionPayload(parsed,sourceName='external-ai-response'){
+ const packageId=String((parsed&& !Array.isArray(parsed)?(parsed.package_id??parsed.packageId):'')||'').trim();
+ const rows=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.pages)?parsed.pages:(Array.isArray(parsed?.corrections)?parsed.corrections:[]));
+ if(!Array.isArray(rows))throw new Error('The response does not contain a pages array.');
+ const exported=packageId?state.externalReviewExports.find(x=>x.id===packageId):null;
+ const expected=exported?[...exported.pageIds]:[];
+ const report={matched:0,unknown:[],duplicates:[],malformed:[],missingExpected:[]};
+ const seen=new Set(),matchedIds=new Set(),proposals=[];
+ rows.forEach((row,index)=>{
+   if(!row||typeof row!=='object'||Array.isArray(row)){report.malformed.push({index,reason:'Entry is not an object.'});return}
+   const pageId=String(row.page_id??row.pageId??'').trim();
+   const corrected=row.corrected_text??row.correctedText;
+   if(!pageId||typeof corrected!=='string'||!corrected.trim()){report.malformed.push({index,page_id:pageId,reason:'page_id and non-empty corrected_text are required.'});return}
+   if(seen.has(pageId)){report.duplicates.push(pageId);return}seen.add(pageId);
+   const page=state.items.find(x=>x.id===pageId);
+   if(!page){report.unknown.push(pageId);return}
+   matchedIds.add(pageId);report.matched++;
+   proposals.push({
+     id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+index+'-'+Math.random(),
+     packageId,pageId,sourceName,importedAt:new Date().toISOString(),
+     correctedText:String(corrected),editedText:String(corrected),note:String(row.note||''),
+     currentTextAtImport:page.finalText||page.text||'',classificationAtImport:page.classification,
+     status:'pending',editing:false
+   });
+ });
+ report.missingExpected=expected.filter(id=>!matchedIds.has(id));
+ return {
+   id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random(),
+   packageId,sourceName,importedAt:new Date().toISOString(),expectedPageIds:expected,
+   proposals,index:0,report
+ };
+}
+function beginExternalImportFromText(raw,sourceName='external-ai-response'){
+ if(state.running||state.activeControllers.size||state.queuePlan){alert('Finish or cancel active processing before importing external corrections.');return null}
+ let parsed,session;
+ try{parsed=parseExternalCorrectionText(raw);session=normalizeExternalCorrectionPayload(parsed,sourceName)}
+ catch(e){alert('Could not import external corrections: '+(e instanceof Error?e.message:String(e)));return null}
+ state.externalImportSession=session;scheduleAutosave();render();
+ setTimeout(()=>window.scrollTo({top:$('external-review-panel')?.offsetTop||0,behavior:'smooth'}),0);
+ return session;
+}
+async function importExternalCorrectionsFile(file){
+ if(!file)return null;
+ return beginExternalImportFromText(await file.text(),file.name);
+}
+function currentExternalProposal(){
+ const s=state.externalImportSession;if(!s||!Array.isArray(s.proposals))return null;
+ while(s.index<s.proposals.length&&s.proposals[s.index]?.status!=='pending')s.index++;
+ return s.proposals[s.index]||null;
+}
+function inlineDiffHtml(oldText,newText){
+ const a=String(oldText||''),b=String(newText||'');if(a===b)return '<span class="small">No text changes proposed.</span>';
+ let p=0;while(p<a.length&&p<b.length&&a[p]===b[p])p++;
+ let s=0;while(s<a.length-p&&s<b.length-p&&a[a.length-1-s]===b[b.length-1-s])s++;
+ const prefix=a.slice(0,p),oldMid=a.slice(p,a.length-s),newMid=b.slice(p,b.length-s),suffix=a.slice(a.length-s);
+ return esc(prefix)+(oldMid?'<del>'+esc(oldMid)+'</del>':'')+(newMid?'<ins>'+esc(newMid)+'</ins>':'')+esc(suffix);
+}
+function externalImportReportDetails(report){
+ const details=[];
+ if(report.unknown?.length)details.push('<details><summary>Unknown page IDs ('+report.unknown.length+')</summary><code>'+esc(report.unknown.join('\n'))+'</code></details>');
+ if(report.duplicates?.length)details.push('<details><summary>Duplicate page IDs ('+report.duplicates.length+')</summary><code>'+esc(report.duplicates.join('\n'))+'</code></details>');
+ if(report.malformed?.length)details.push('<details><summary>Malformed entries ('+report.malformed.length+')</summary><code>'+esc(report.malformed.map(x=>'Entry '+x.index+': '+x.reason).join('\n'))+'</code></details>');
+ if(report.missingExpected?.length)details.push('<details><summary>Expected but missing ('+report.missingExpected.length+')</summary><code>'+esc(report.missingExpected.join('\n'))+'</code></details>');
+ return details.join('');
+}
+function renderExternalReviewPanel(){
+ const box=$('external-review-panel');if(!box)return;
+ const session=state.externalImportSession;
+ if(!session){box.classList.add('hidden');box.innerHTML='';return}
+ const r=session.report||{matched:0,unknown:[],duplicates:[],malformed:[],missingExpected:[]},proposal=currentExternalProposal();
+ box.classList.remove('hidden');
+ const report='<div class="external-report"><span>'+r.matched+' matched</span><span>'+(r.unknown?.length||0)+' unknown</span><span>'+(r.duplicates?.length||0)+' duplicate</span><span>'+(r.malformed?.length||0)+' malformed</span><span>'+(r.missingExpected?.length||0)+' expected missing</span></div>'+externalImportReportDetails(r);
+ if(!proposal){
+   const accepted=session.proposals.filter(x=>x.status==='accepted').length,rejected=session.proposals.filter(x=>x.status==='rejected').length;
+   box.innerHTML='<h2 style="margin:0">External AI import review complete</h2>'+report+
+     '<div>'+accepted+' accepted · '+rejected+' rejected. External AI never controlled page approval or pile state directly.</div>'+
+     '<div class="external-import-actions"><button id="external-session-close">Close import review</button></div>';
+   $('external-session-close').onclick=()=>{state.externalImportSession=null;scheduleAutosave();render()};return;
+ }
+ const page=state.items.find(x=>x.id===proposal.pageId);
+ if(!page){proposal.status='missing';session.index++;scheduleAutosave();render();return}
+ const current=page.finalText||page.text||'',draft=proposal.editedText??proposal.correctedText;
+ const changedSinceImport=current!==proposal.currentTextAtImport;
+ box.innerHTML='<h2 style="margin:0">External correction proposed — human review required</h2>'+
+   '<div class="small">Proposal '+(session.index+1)+' of '+session.proposals.length+(session.packageId?' · Package '+esc(session.packageId):' · Package ID not supplied')+'</div>'+report+
+   (changedSinceImport?'<div class="reason" style="border-color:#f59e0b;background:#fffbeb"><b>Page changed since import.</b> Review the current text carefully before accepting this older proposal.</div>':'')+
+   '<div class="external-grid">'+
+     '<div class="external-pane"><b>Source image</b>'+(page.url?'<div class="external-image"><img src="'+page.url+'" alt="'+esc(page.name)+'"></div>':'<div class="reason">Source image unavailable.</div>')+'<div class="small">'+esc(page.name)+' · '+esc(page.classification)+'</div></div>'+
+     '<div class="external-pane"><b>Current final</b><pre>'+esc(current)+'</pre></div>'+
+     '<div class="external-pane"><b>Proposed external text</b><textarea id="external-proposed-text" '+(proposal.editing?'':'readonly')+'>'+esc(draft)+'</textarea>'+(proposal.note?'<div class="small"><b>External note:</b> '+esc(proposal.note)+'</div>':'')+'</div>'+
+   '</div>'+
+   '<div class="external-diff"><b>Diff</b><div id="external-diff-body" style="margin-top:7px">'+inlineDiffHtml(current,draft)+'</div></div>'+
+   '<div class="external-import-actions">'+
+     '<button class="primary" id="external-accept">Accept'+(proposal.editing?' edited':'')+' proposal</button>'+
+     '<button id="external-reject">Reject</button>'+
+     '<button id="external-edit">'+(proposal.editing?'Editing enabled':'Edit proposal')+'</button>'+
+     '<button id="external-session-close">Close for now</button>'+
+   '</div>';
+ const ta=$('external-proposed-text');
+ if(ta)ta.oninput=()=>{proposal.editedText=ta.value;const d=$('external-diff-body');if(d)d.innerHTML=inlineDiffHtml(page.finalText||page.text||'',ta.value);scheduleAutosave()};
+ $('external-accept').onclick=()=>acceptExternalProposal();
+ $('external-reject').onclick=()=>rejectExternalProposal();
+ $('external-edit').onclick=()=>{proposal.editing=true;scheduleAutosave();render();setTimeout(()=>$('external-proposed-text')?.focus(),0)};
+ $('external-session-close').onclick=()=>{scheduleAutosave();box.classList.add('hidden')};
+}
+async function acceptExternalProposal(){
+ const session=state.externalImportSession,proposal=currentExternalProposal();if(!session||!proposal)return;
+ const page=state.items.find(x=>x.id===proposal.pageId);if(!page)return;
+ const proposed=String($('external-proposed-text')?.value??proposal.editedText??proposal.correctedText);
+ if(!proposed.trim()){alert('The proposed corrected text is empty. Edit it or reject the proposal.');return}
+ const current=page.finalText||page.text||'';
+ if(current!==proposal.currentTextAtImport&&!confirm('This page changed after the external response was imported. Accept the proposal against the newer current text anyway?'))return;
+ const wasApproved=page.classification==='approved'||page.needsReapproval||page.classification==='needsreapproval'||page.preRefreshClassification==='approved';
+ const beforeHash=await sha256Hex(current);
+ pushRevision(page,'Before external AI correction');
+ const repaired=repairLatexForMathJax(proposed);
+ reanchorReviewFlags(page,current,repaired.text);reanchorRegions(page,current,repaired.text);
+ page.repairedText=repaired.text;page.finalText=repaired.text;page.text=repaired.text;page.repairs=repaired.repairs;
+ page.validationWarnings=latexStructuralWarnings(repaired.text);page.validationDetails=latexValidationDetails(repaired.text);page.mathRenderWarnings=[];page.error='';page.lastError='';page.status='done';page.editingSnapshotTaken=false;
+ const regionStale=recomputeRegionDependencies(page,repaired.text);
+ if(regionStale){
+   const stale=(page.regions||[]).find(x=>x.needsRefresh);markNeedsRefresh(page,stale,'Accepted external correction left a targeted-region dependency out of sync with final text.');if(wasApproved)page.needsReapproval=true;
+ }else if(wasApproved){
+   page.needsReapproval=true;page.classification='needsreapproval';page.reason='Accepted external AI correction changed a previously approved page; human reapproval is required.';
+ }else{
+   const cl=classifyText(repaired.text);page.classification=cl.classification;page.reason='Accepted external AI correction after human diff review. '+cl.reason;
+ }
+ refreshPageNumberSuggestion(page);
+ const acceptedHash=await sha256Hex(repaired.text);
+ page.externalCorrections=page.externalCorrections||[];
+ page.externalCorrections.push({id:proposal.id,packageId:proposal.packageId||'',sourceName:proposal.sourceName||'',importedAt:proposal.importedAt,decidedAt:new Date().toISOString(),decision:'accepted',note:proposal.note||'',proposedText:proposal.correctedText,acceptedText:repaired.text,previousFinalHash:beforeHash,acceptedFinalHash:acceptedHash});
+ if(page.externalCorrections.length>100)page.externalCorrections.shift();
+ proposal.editedText=proposed;proposal.status='accepted';proposal.decidedAt=new Date().toISOString();session.index++;
+ scheduleAutosave();render();
+}
+async function rejectExternalProposal(){
+ const session=state.externalImportSession,proposal=currentExternalProposal();if(!session||!proposal)return;
+ const page=state.items.find(x=>x.id===proposal.pageId);
+ if(page){
+   page.externalCorrections=page.externalCorrections||[];
+   page.externalCorrections.push({id:proposal.id,packageId:proposal.packageId||'',sourceName:proposal.sourceName||'',importedAt:proposal.importedAt,decidedAt:new Date().toISOString(),decision:'rejected',note:proposal.note||'',proposedText:proposal.correctedText,currentFinalHash:await sha256Hex(page.finalText||page.text||'')});
+   if(page.externalCorrections.length>100)page.externalCorrections.shift();
+ }
+ proposal.status='rejected';proposal.decidedAt=new Date().toISOString();session.index++;
+ scheduleAutosave();render();
+}
 async function exportProjectArchive(){
  if(state.running||state.activeControllers.size){alert('Finish active AI requests before building an archive.');return}
  await saveProjectState();
@@ -2674,6 +2962,9 @@ window.exportRegionReviewPackage=async(pageId,regionId)=>{
  downloadBlob('region-review-'+slug(page.name)+'-'+slug(region.note||region.id)+'.zip',buildStoreZip(entries));
 };
 $('archive-project').onclick=()=>exportProjectArchive();
+$('external-review-export').onclick=()=>exportExternalReviewPackages(null);
+$('external-review-import').onclick=()=>$('external-review-file').click();
+$('external-review-file').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)importExternalCorrectionsFile(file)};
 
 async function exportProjectJson(){
  await saveProjectState();
