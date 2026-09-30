@@ -700,6 +700,178 @@ Create a ZIP containing:
 6. safer LaTeX validator
 7. autosave state
 
+Phase A establishes the rule that useful earlier results are never destroyed.
+
+## Phase A2 — Reliability Hardening
+
+This phase moves reliability infrastructure ahead of automatic routing and large-batch features.
+
+### A2.1 Versioned project schema
+
+Use an explicit project format such as:
+
+`math-photo-notes-project-v1`
+
+Persist:
+
+- stable page IDs
+- image hash
+- file metadata
+- ordering
+- current processing state
+- raw/repaired/final transcription
+- revision history
+- repair history
+- validation warnings
+- retry/attempt history
+- provider/model provenance
+- approval state
+- cache metadata
+
+API keys must never be stored in the project.
+
+Future schema changes must migrate old project data rather than silently discarding it.
+
+### A2.2 IndexedDB project storage
+
+Use IndexedDB for durable project/page/image storage.
+
+Use `localStorage` only for small preferences and a lightweight compatibility/recovery path.
+
+Large image batches must not depend on `localStorage` quota.
+
+### A2.3 Corrupt-state recovery
+
+Project loading must:
+
+- validate the project envelope/version
+- back up malformed data before resetting
+- explain recovery failures clearly
+- avoid replacing corrupt data with an empty project without preserving the original
+- migrate known older schema versions when possible
+
+### A2.4 Provider capability registry
+
+Track capabilities per provider/configuration, including:
+
+- vision/image input
+- known truncation/finish metadata
+- usage metadata availability
+- compatible image formats
+- request cancellation support
+- base URL requirements
+- browser/CORS caveats
+
+Do not assume every OpenAI-compatible endpoint implements the same behavior.
+
+### A2.5 Diagnostics / Doctor
+
+Add a diagnostics report that checks:
+
+- IndexedDB availability
+- storage quota when the browser exposes it
+- autosave health
+- image-format support
+- selected provider configuration
+- model name presence
+- API-key presence without storing or displaying the key
+- compatible base URL configuration
+- request timeout/cancellation support
+- cached result count
+- interrupted/running jobs needing recovery
+
+Diagnostics should recommend a next action rather than just dumping errors.
+
+### A2.6 Request identity, cancellation, and stale-result protection
+
+Every AI attempt gets a unique attempt ID.
+
+Requirements:
+
+- `AbortController` where supported
+- explicit request timeout
+- Cancel Current / Cancel Batch
+- a late response from an older attempt must never overwrite a newer attempt
+- duplicate clicks must not create duplicate in-flight work
+- interrupted requests return to a resumable state rather than silently becoming bad transcriptions
+
+### A2.7 Durable job state
+
+Track page jobs independently from the UI loop.
+
+Suggested states:
+
+- Queued
+- Running
+- Interrupted
+- Done
+- Failed
+- Approved
+
+On reload, a previously Running item should become Interrupted/Queued for safe resume.
+
+### A2.8 Image and processing fingerprints
+
+Compute a cryptographic image hash where Web Crypto is available.
+
+Build a processing fingerprint from:
+
+- image hash
+- provider
+- model
+- prompt version/content
+- relevant image/detail options
+
+Use fingerprints for:
+
+- exact duplicate detection
+- preventing accidental duplicate calls
+- identifying whether a cached transcription is reusable
+- provenance in revision history
+
+### A2.9 Content-addressed cache
+
+Cache successful AI results by processing fingerprint.
+
+A cache entry should preserve:
+
+- raw transcription
+- provider/model
+- stop reason
+- timestamp
+- repair/validation results
+
+A retry explicitly requested as a fresh AI pass must be able to bypass the cache.
+
+### A2.10 Regression fixtures and self-tests
+
+Create deterministic tests for:
+
+- safe LaTeX repair
+- classification
+- truncation parsing
+- project-schema migration/validation
+- stale-attempt rejection
+- processing fingerprints
+
+Maintain a manual/fixture corpus containing:
+
+- fractions
+- radicals
+- integrals
+- matrices
+- superscripts/subscripts
+- crossed-out handwriting
+- blank pages
+- rotated pages
+- shadows
+- long pages
+- Unicode math
+- malformed LaTeX
+- explicit `MATH_UNSURE` markers
+
+The known semantic bug `√x → \\sqrt{}x` must remain a permanent regression test.
+
 ## Phase B — AI Routing
 
 1. Primary/Secondary configuration
@@ -708,7 +880,8 @@ Create a ZIP containing:
 4. retry limits
 5. model history
 6. provider error handling
-7. rate-limit handling
+7. rate-limit/backoff handling
+8. cache bypass/fresh-pass controls
 
 ## Phase C — Math Review
 
@@ -717,6 +890,7 @@ Create a ZIP containing:
 3. structured Math Unsure markers
 4. highlight malformed math
 5. math-specific warning categories
+6. deterministic checks before optional AI verification
 
 ## Phase D — Human Review Interface
 
@@ -726,15 +900,19 @@ Create a ZIP containing:
 4. keyboard shortcuts
 5. approve/unapprove workflow
 6. previous/next navigation
+7. anchored review flags tied to text ranges and optionally image regions
+8. edits after approval automatically produce Needs Reapproval
 
 ## Phase E — Batch Scale
 
 1. concurrency control
-2. queue manager
+2. durable queue manager
 3. pause/resume
-4. duplicate detection
+4. duplicate detection using image hashes
 5. page ordering
 6. retry/backoff system
+7. resumable interrupted jobs
+8. request deduplication/idempotency
 
 ## Phase F — Document Organization
 
@@ -750,52 +928,75 @@ Create a ZIP containing:
 2. model disagreement detection
 3. optional dual-model transcription
 4. targeted crop reprocessing
+5. region-level provenance
+6. dependency tracking
+7. Needs Refresh state for downstream text affected by a targeted re-analysis
+
+Do not recompute an entire page when only one region needs another pass unless the user requests it.
 
 ## Phase H — Export and Archival
 
 1. Markdown export
 2. `.tex` export
 3. MathJax PDF
-4. project save/load
+4. versioned project export/import
 5. ZIP archive
 6. usage/cost report
+7. portable per-page/per-equation review packages
+8. provenance/audit manifest
+
+## Phase I — Optional High-Accuracy Workflows
+
+1. independent Math Verifier role over source crop + candidate transcription
+2. verifier must not receive hidden reasoning from the first model
+3. human remains the final approval authority
+4. Fast Batch and Guided Review share the same underlying processing engine
+
+Avoid autonomous multi-agent orchestration where deterministic application logic is sufficient.
 
 ---
 
 # PART 15 — Recommended Build Order
 
-### Upgrade 1
-Approved state + revision history + raw/repaired/final text.
+### Upgrade 1 — Phase A
+Approved state + revision history + raw/repaired/final text + truncation detection + retry counters + safer validator + baseline autosave.
 
-### Upgrade 2
-API truncation detection + retry counters + provider error handling.
+### Upgrade 2 — Phase A2
+Versioned project schema + IndexedDB + recovery/migrations + provider capability registry + Doctor diagnostics.
 
-### Upgrade 3
-Live MathJax preview + stronger EquationWright validation.
+### Upgrade 3 — Phase A2 continuation
+Request IDs + timeout/cancellation + stale-response guards + durable job states + image/process fingerprints + exact-result cache + regression self-tests.
 
 ### Upgrade 4
-Side-by-side review interface.
+Live MathJax preview + stronger EquationWright validation.
 
 ### Upgrade 5
-Queue manager + concurrency + pause/resume.
+Side-by-side guided review + anchored flags + Needs Reapproval behavior.
 
 ### Upgrade 6
-Document organization + page ordering.
+Durable queue manager + concurrency + pause/resume + retry/backoff.
 
 ### Upgrade 7
-Automatic Primary/Secondary routing.
+Document organization + page ordering.
 
 ### Upgrade 8
-Equation-only retries and model disagreement checking.
+Automatic Primary/Secondary routing using the hardened processing engine.
 
 ### Upgrade 9
-Project persistence + full export/archive system.
+Equation/region-only retries + model disagreement checking + dependency/Needs Refresh tracking.
+
+### Upgrade 10
+Full archive/export system + portable review packages + usage/cost reporting.
 
 ---
 
-# Design Principle
+# Design Principles
 
 **Never silently replace uncertainty with confidence.**
+
+**Never destroy a useful earlier result.**
+
+**Never recompute more than necessary.**
 
 When the system knows what it can safely repair, it should repair it.
 
@@ -805,8 +1006,10 @@ When it has a plausible interpretation but is uncertain, it should show:
 
 When it cannot determine the content reliably, it should send that page to the appropriate review pile.
 
+Deterministic software should own mechanical checks, state transitions, storage, caching, and routing. AI calls should be used only where language/vision judgment is actually needed.
+
 The final workflow becomes:
 
-`Import → Primary AI → classify → safe repair → secondary AI where appropriate → human review → Approved → export`
+`Import → fingerprint → Primary AI/cache → classify → safe repair/validate → targeted secondary AI where appropriate → human review → Approved → export`
 
-with the original image, original AI response, repair history, and previous versions always recoverable.
+with the original image, processing provenance, original AI response, repair history, earlier revisions, and approval lineage always recoverable.
