@@ -309,9 +309,11 @@ const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarn
 const AUTOSAVE_KEY='math_photo_to_notes_phase_a_v1';
 const PROJECT_SCHEMA='math-photo-notes-project-v1';
 const DB_NAME='math-photo-to-notes';
-const DB_VERSION=1;
+const DB_VERSION=2;
 const DB_PROJECTS='projects';
 const DB_CACHE='cache';
+const DB_RELIABILITY='reliability';
+const RELIABILITY_LEDGER_KEY='spot-check-ledger-v1';
 const REQUEST_TIMEOUT_MS=90000;
 const MAX_TRANSIENT_RETRIES=3;
 const BASE_RETRY_DELAY_MS=2000;
@@ -336,6 +338,7 @@ function openProjectDB(){
      const db=req.result;
      if(!db.objectStoreNames.contains(DB_PROJECTS))db.createObjectStore(DB_PROJECTS);
      if(!db.objectStoreNames.contains(DB_CACHE))db.createObjectStore(DB_CACHE);
+     if(!db.objectStoreNames.contains(DB_RELIABILITY))db.createObjectStore(DB_RELIABILITY);
    };
    req.onsuccess=()=>resolve(req.result);
    req.onerror=()=>reject(req.error||new Error('IndexedDB open failed'));
@@ -375,6 +378,28 @@ async function idbCount(store){
    req.onsuccess=()=>resolve(req.result||0);req.onerror=()=>reject(req.error);
    tx.oncomplete=()=>db.close();
  });
+}
+function normalizeSpotCheckLedger(list){
+ return Array.isArray(list)?list.filter(x=>x&&x.pageId&&['ok','error'].includes(x.outcome)).map(x=>({...x})):[];
+}
+function mergeSpotCheckLedgers(...lists){
+ const out=[],seen=new Set();
+ for(const list of lists)for(const rec of normalizeSpotCheckLedger(list)){
+   const key=rec.id||[rec.at||'',rec.pageId||'',rec.finalTextHash||'',rec.outcome||'',rec.provider||'',rec.model||''].join('|');
+   if(seen.has(key))continue;seen.add(key);out.push(rec);
+ }
+ out.sort((a,b)=>String(a.at||'').localeCompare(String(b.at||'')));
+ return out.slice(-20000);
+}
+async function loadGlobalSpotCheckLedger(){
+ try{
+   const saved=await idbGet(DB_RELIABILITY,RELIABILITY_LEDGER_KEY);
+   state.spotCheckLedger=mergeSpotCheckLedgers(state.spotCheckLedger,saved);
+ }catch(e){}
+ return state.spotCheckLedger;
+}
+async function saveGlobalSpotCheckLedger(){
+ try{await idbPut(DB_RELIABILITY,RELIABILITY_LEDGER_KEY,normalizeSpotCheckLedger(state.spotCheckLedger))}catch(e){}
 }
 function serializableItem(i,includeImage=true){
  const copy={...i};
@@ -445,6 +470,7 @@ function validateProjectEnvelope(saved){
 }
 async function saveProjectState(){
  const payload=projectEnvelope(true);
+ saveGlobalSpotCheckLedger().catch(()=>{});
  try{
    await idbPut(DB_PROJECTS,'current',payload);
    state.autosaveWarning='';
@@ -476,7 +502,7 @@ function hydrateSavedItems(saved){
  state.documents=Array.isArray(saved.documents)?saved.documents.filter(x=>x&&x.id&&x.name).map(x=>({...x})):[];
  state.documentFilter=saved.documentFilter||'all';
  state.lastBatchSummary=saved.lastBatchSummary&&Array.isArray(saved.lastBatchSummary.pageIds)?saved.lastBatchSummary:null;
- state.spotCheckLedger=Array.isArray(saved.spotCheckLedger)?saved.spotCheckLedger.filter(x=>x&&x.pageId&&['ok','error'].includes(x.outcome)):[];
+ state.spotCheckLedger=mergeSpotCheckLedgers(state.spotCheckLedger,saved.spotCheckLedger);
  state.spotCheckSession=saved.spotCheckSession&&Array.isArray(saved.spotCheckSession.pageIds)?{...saved.spotCheckSession,pageIds:[...saved.spotCheckSession.pageIds],index:Number(saved.spotCheckSession.index||0)}:null;
  state.externalReviewExports=Array.isArray(saved.externalReviewExports)?saved.externalReviewExports.filter(x=>x&&x.id&&Array.isArray(x.pageIds)).slice(-100):[];
  state.externalImportSession=saved.externalImportSession&&Array.isArray(saved.externalImportSession.proposals)?{...saved.externalImportSession,index:Number(saved.externalImportSession.index||0),proposals:saved.externalImportSession.proposals.map(x=>({...x}))}:null;
@@ -1219,7 +1245,8 @@ async function recordSpotCheck(outcome){
    classificationAtCheck:page.classification,outcome,errorCategory:category,note
  };
  state.spotCheckLedger=state.spotCheckLedger||[];state.spotCheckLedger.push(rec);
- if(state.spotCheckLedger.length>5000)state.spotCheckLedger.shift();
+ if(state.spotCheckLedger.length>20000)state.spotCheckLedger.shift();
+ saveGlobalSpotCheckLedger().catch(()=>{});
  if(outcome==='error'){
    page.classification='review';page.status='done';
    page.reason='Human Good-page spot-check found an error'+(category?' ('+SPOTCHECK_ERROR_CATEGORIES.find(x=>x[0]===category)?.[1]+')':'')+'. Review or correct this page before approval.';
@@ -2369,7 +2396,7 @@ async function runDoctor(){
    ['Interrupted jobs',String(interrupted)],
    ['Targeted regions',String(state.items.reduce((n,i)=>n+(i.regions?.length||0),0))],
    ['Needs Refresh pages',String(state.items.filter(i=>i.classification==='needsrefresh'||i.needsRefresh).length)],
-   ['Good-page spot checks',(()=>{const l=state.spotCheckLedger||[];return l.length+' checked / '+l.filter(x=>x.outcome==='error').length+' errors found'})()],
+   ['Global Good-page spot checks',(()=>{const l=state.spotCheckLedger||[];return l.length+' checked / '+l.filter(x=>x.outcome==='error').length+' errors found · survives Clear all'})()],
    ['External AI review',(()=>{const p=state.externalReviewExports||[],a=state.items.reduce((n,i)=>n+(i.externalCorrections||[]).filter(x=>x.decision==='accepted').length,0),r=state.items.reduce((n,i)=>n+(i.externalCorrections||[]).filter(x=>x.decision==='rejected').length,0);return p.length+' packages / '+a+' accepted / '+r+' rejected'})()],
    ['Recorded usage',(()=>{const t=buildUsageReport(state.items).totals;return t.input+' input / '+t.output+' output tokens / est. USD '+t.estimatedCost.toFixed(4)})()],
    ['Self-tests',selfTests.passed+'/'+selfTests.total+' passed'],
@@ -3036,7 +3063,7 @@ async function importProjectFile(file){
  try{parsed=JSON.parse(await file.text());validateProjectEnvelope(parsed)}catch(e){alert('Could not open project: '+(e instanceof Error?e.message:String(e)));return}
  if(state.items.length&&!confirm('Replace the current project with "'+file.name+'"?'))return;
  state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});
- hydrateSavedItems(parsed);state.guidedReview=false;state.guidedItemId=null;state.regionDraft=null;$('region-modal')?.classList.add('hidden');
+ hydrateSavedItems(parsed);await saveGlobalSpotCheckLedger();state.guidedReview=false;state.guidedItemId=null;state.regionDraft=null;$('region-modal')?.classList.add('hidden');
  if(state.queuePlan){state.queuePaused=true;state.running=false;queueButtonsDisabled(true)}
  await idbPut(DB_PROJECTS,'current',projectEnvelope(true));try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(projectEnvelope(false)))}catch(e){}
  const active=document.querySelector('#tabs button[data-filter="'+state.filter+'"]');if(active)document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===active));
@@ -3173,10 +3200,10 @@ $('pdf-document').onclick=()=>{
  exportPdfPile(organizationScopedItems(),'Photo-to-Text — '+label);
 };
 
-$('clear').onclick=async()=>{if(!confirm('Clear all loaded images and results?'))return;state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});for(const ctrl of state.activeControllers.values())ctrl.abort();state.items=[];state.documents=[];state.documentFilter='all';state.guidedItemId=null;state.guidedScope='filter';state.guidedPageIds=null;state.lastBatchSummary=null;state.spotCheckLedger=[];state.spotCheckSession=null;state.externalReviewExports=[];state.externalImportSession=null;state.regionDraft=null;$('region-modal')?.classList.add('hidden');await clearAutosave();render()};
+$('clear').onclick=async()=>{if(!confirm('Clear all loaded images and project results? Spot-check reliability evidence is kept separately.'))return;state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});for(const ctrl of state.activeControllers.values())ctrl.abort();state.items=[];state.documents=[];state.documentFilter='all';state.guidedItemId=null;state.guidedScope='filter';state.guidedPageIds=null;state.lastBatchSummary=null;state.spotCheckSession=null;state.externalReviewExports=[];state.externalImportSession=null;state.regionDraft=null;$('region-modal')?.classList.add('hidden');await clearAutosave();await saveGlobalSpotCheckLedger();render()};
 
 loadSettings();
-restoreProjectState().then(()=>{
+loadGlobalSpotCheckLedger().then(()=>restoreProjectState()).then(()=>saveGlobalSpotCheckLedger()).then(()=>{
  if(state.queuePlan){state.queuePaused=true;state.running=false;queueButtonsDisabled(true)}
  const active=document.querySelector('#tabs button[data-filter="'+state.filter+'"]');
  if(active)document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===active));
