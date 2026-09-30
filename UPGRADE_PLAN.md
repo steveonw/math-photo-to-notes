@@ -679,7 +679,7 @@ Acceptance criteria:
 - dashboard counts are scoped to the completed run's actual page IDs
 - failed retry does not blindly repeat a known same-slot auth/configuration failure
 
-**Next active release:** Release B — Good Spot Checks.
+**Followed by:** Release B — Good Spot Checks.
 
 ---
 
@@ -717,7 +717,7 @@ Acceptance criteria:
 - a human-found error cannot remain silently in Good
 - no formal accuracy percentage is claimed
 
-**Next active release:** Release C — External AI Round Trip.
+**Followed by:** Release C — External AI Round Trip.
 
 ---
 
@@ -797,7 +797,7 @@ Acceptance criteria:
 
 ---
 
-## Release D — High Assurance Math## Release D — High Assurance Math
+## Release D — High Assurance Math
 
 1. math-heavy deterministic trigger signals
 2. configurable verification policy
