@@ -4,6 +4,18 @@ A browser-based bulk photo-to-text transcription and human-review tool for handw
 
 This project is based on the photo-to-text workflow from `steveonw/study-suite` and incorporates deterministic math/LaTeX ideas from `steveonw/equationwright`.
 
+## Current workflow
+
+The default path is now **Quick Transcribe**:
+
+`Import → Process Batch → preserve raw → repair/validate → sort into piles → Batch Summary`
+
+Quick Transcribe uses one Primary semantic transcription pass per page. Optional **Auto-fix flagged pages** enables the existing bounded second-pass routing for Review / Unclear / Math Unsure / eligible Failed pages. Guided Review is a post-processing action rather than a separate processing mode.
+
+At the end of a run, the dashboard can open flagged pages in Guided Review, resume Interrupted pages, retry eligible Failed pages, or export the project. **Good means no automatic warning signals were detected; it does not mean independently verified.**
+
+**High Assurance Math** is shown as a disabled future option and is not active yet.
+
 ## Current capabilities
 
 - Primary and Secondary vision-AI configurations
