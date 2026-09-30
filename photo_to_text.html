@@ -9,7 +9,7 @@
   --bg:#f4f4f5;--card:#fff;--text:#18181b;--muted:#71717a;--line:#e4e4e7;
   --accent:#111827;--good:#047857;--goodbg:#ecfdf5;--review:#7c3aed;--reviewbg:#f5f3ff;
   --unclear:#b45309;--unclearbg:#fffbeb;--failed:#b91c1c;--failedbg:#fef2f2;
-  --approved:#166534;--approvedbg:#f0fdf4;--interrupted:#92400e;--interruptedbg:#fffbeb;
+  --approved:#166534;--approvedbg:#f0fdf4;--needsreapproval:#9f1239;--needsreapprovalbg:#fff1f2;--interrupted:#92400e;--interruptedbg:#fffbeb;
   --queued:#52525b;--running:#1d4ed8;--runningbg:#eff6ff
 }
 *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
@@ -20,13 +20,16 @@ label{display:block;margin:10px 0}.label{display:block;font-size:12px;font-weigh
 input,select,textarea,button{font:inherit} input,select,textarea{width:100%;padding:10px 11px;border:1px solid #d4d4d8;border-radius:12px;background:#fff}
 textarea{min-height:145px;resize:vertical}.toolbar{display:flex;flex-wrap:wrap;gap:9px;margin-top:14px}
 button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius:12px;font-weight:700;cursor:pointer}button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}button:disabled{opacity:.5;cursor:not-allowed}
-.stats{display:grid;grid-template-columns:repeat(10,1fr);gap:9px;margin-top:16px}.stat{border:1px solid var(--line);border-radius:14px;padding:11px}.stat b{font-size:23px;display:block}.stat span{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+.stats{display:grid;grid-template-columns:repeat(11,1fr);gap:9px;margin-top:16px}.stat{border:1px solid var(--line);border-radius:14px;padding:11px}.stat b{font-size:23px;display:block}.stat span{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.08em}
 .pile-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}.pile-tabs button.active{background:#111827;color:#fff}
 .card{display:grid;grid-template-columns:280px 1fr;overflow:hidden;padding:0}.side{padding:16px;border-right:1px solid var(--line);background:#fafafa}.main{padding:16px}
-.preview{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:14px;border:1px solid var(--line);margin-top:12px}.name{font-weight:800;word-break:break-word}.small{font-size:12px;color:var(--muted)}
+.guided-review .card{grid-template-columns:minmax(380px,.95fr) minmax(520px,1.25fr)}.guided-review .side{background:#f8fafc}.guided-review .main{min-width:0}
+.image-stage{margin-top:12px;border:1px solid var(--line);border-radius:14px;background:#e5e7eb;min-height:280px;max-height:72vh;overflow:auto;display:flex;align-items:center;justify-content:center;padding:12px}
+.preview{display:block;max-width:100%;height:auto;border-radius:10px;transform-origin:center center;transition:transform .12s ease}.image-tools{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.image-tools button{padding:6px 8px;font-size:11px}
+.name{font-weight:800;word-break:break-word}.small{font-size:12px;color:var(--muted)}
 .badge{display:inline-block;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;border:1px solid var(--line)}
 .badge.good{color:var(--good);background:var(--goodbg)}.badge.review{color:var(--review);background:var(--reviewbg)}.badge.unclear{color:var(--unclear);background:var(--unclearbg)}.badge.mathunsure{color:#9a3412;background:#fff7ed}
-.badge.failed{color:var(--failed);background:var(--failedbg)}.badge.approved{color:var(--approved);background:var(--approvedbg)}.badge.interrupted{color:var(--interrupted);background:var(--interruptedbg)}.badge.running{color:var(--running);background:var(--runningbg)}.badge.queued{color:var(--queued);background:#f4f4f5}
+.badge.failed{color:var(--failed);background:var(--failedbg)}.badge.approved{color:var(--approved);background:var(--approvedbg)}.badge.needsreapproval{color:var(--needsreapproval);background:var(--needsreapprovalbg)}.badge.interrupted{color:var(--interrupted);background:var(--interruptedbg)}.badge.running{color:var(--running);background:var(--runningbg)}.badge.queued{color:var(--queued);background:#f4f4f5}
 .output{width:100%;min-height:380px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.55}.reason{margin:8px 0 12px;padding:9px 11px;border:1px solid var(--line);border-radius:11px;background:#fafafa;font-size:12px}
 .error{background:var(--failedbg);color:var(--failed);padding:10px;border-radius:11px;margin:8px 0;white-space:pre-wrap}
 .hidden{display:none!important}.empty{text-align:center;padding:45px;color:var(--muted)}
@@ -35,7 +38,8 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
 .comparebox{border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0;background:#fafafa}.comparebox pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0 14px;font-size:12px}
 .historybox{margin-top:10px}.historybox summary{cursor:pointer;font-weight:700}.historybox ol{padding-left:20px}.historybox li{margin:6px 0;font-size:12px}
 .editorgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}.previewpane{border:1px solid var(--line);border-radius:12px;padding:12px;min-height:380px;background:#fff;white-space:pre-wrap;overflow-wrap:anywhere}.previewpane.render-error{border-color:#dc2626;background:#fef2f2}.previewtitle{font-size:12px;font-weight:800;margin-bottom:8px}.math-warning-list{display:grid;gap:7px;margin:10px 0}.math-warning{border:1px solid #fed7aa;background:#fff7ed;border-radius:10px;padding:8px 10px;font-size:12px}.math-warning code{display:block;margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere}.math-marker{border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:8px 10px;font-size:12px}
-@media(max-width:1050px){.editorgrid{grid-template-columns:1fr}}
+.review-flags{display:grid;gap:7px;margin:10px 0}.review-flag{border:1px solid #cbd5e1;border-radius:10px;padding:8px 10px;background:#f8fafc;font-size:12px}.review-flag.detached{border-color:#f59e0b;background:#fffbeb}.review-flag code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;margin:5px 0}.review-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.shortcut-help{padding:7px 9px;border-radius:10px;background:#f4f4f5;font-size:11px;color:var(--muted)}
+@media(max-width:1050px){.editorgrid,.guided-review .card{grid-template-columns:1fr}}
 @media(max-width:900px){.top,.card{grid-template-columns:1fr}.side{border-right:0;border-bottom:1px solid var(--line)}.stats{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
@@ -52,6 +56,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     <div class="stat"><span>Unclear</span><b id="s-unclear">0</b></div>
     <div class="stat"><span>Math Unsure</span><b id="s-mathunsure">0</b></div>
     <div class="stat"><span>Approved</span><b id="s-approved">0</b></div>
+    <div class="stat"><span>Needs Reapproval</span><b id="s-needsreapproval">0</b></div>
     <div class="stat"><span>Failed</span><b id="s-failed">0</b></div>
     <div class="stat"><span>Queued</span><b id="s-queued">0</b></div>
     <div class="stat"><span>Running</span><b id="s-running">0</b></div>
@@ -106,6 +111,13 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     <button class="primary" id="run">Process batch</button>
     <button id="cancel-batch">Cancel batch</button>
     <button id="doctor">Doctor / Diagnostics</button>
+    <button id="guided-review">Guided Review</button>
+    <div class="review-nav">
+      <button id="review-prev">← Previous</button>
+      <span id="review-position" class="small">0 / 0</span>
+      <button id="review-next">Next →</button>
+    </div>
+    <span class="shortcut-help">Guided keys: A approve · R review · U unclear · M math unsure · 1 Primary · 2 Secondary · ←/→ navigate · Esc exit</span>
     <span class="small" style="align-self:center;font-weight:700">Current pile:</span>
     <select id="current-ai" style="width:auto">
       <option value="primary" selected>Primary</option>
@@ -163,6 +175,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     <button data-filter="unclear">Unclear</button>
     <button data-filter="mathunsure">Math Unsure</button>
     <button data-filter="approved">Approved</button>
+    <button data-filter="needsreapproval">Needs Reapproval</button>
     <button data-filter="failed">Failed</button>
     <button data-filter="queued">Queued</button>
     <button data-filter="interrupted">Interrupted</button>
@@ -198,7 +211,7 @@ Rules:
 - Example:
   [MATH_UNSURE: seen="x ? 4" guess="$x+4$" note="operator could be + or -"] (I think it says: $x+4$)`
 
-const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarning:'',cancelRequested:false,activeControllers:new Map(),previewTimers:new Map()};
+const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarning:'',cancelRequested:false,activeControllers:new Map(),previewTimers:new Map(),guidedReview:false,guidedItemId:null};
 const AUTOSAVE_KEY='math_photo_to_notes_phase_a_v1';
 const PROJECT_SCHEMA='math-photo-notes-project-v1';
 const DB_NAME='math-photo-to-notes';
@@ -335,6 +348,12 @@ function hydrateSavedItems(saved){
      validationWarnings:Array.isArray(x.validationWarnings)?x.validationWarnings:[],
      validationDetails:Array.isArray(x.validationDetails)?x.validationDetails:latexValidationDetails(x.finalText||x.text||''),
      mathRenderWarnings:Array.isArray(x.mathRenderWarnings)?x.mathRenderWarnings:[],
+     reviewFlags:Array.isArray(x.reviewFlags)?x.reviewFlags:[],
+     imageRotation:Number(x.imageRotation||0),
+     imageZoom:Number(x.imageZoom||1),
+     imageFit:x.imageFit||'page',
+     approvalAt:x.approvalAt||'',
+     needsReapproval:!!x.needsReapproval,
      primaryAttempts:Number(x.primaryAttempts||0),
      secondaryAttempts:Number(x.secondaryAttempts||0),
      failures:Number(x.failures||0),
@@ -442,9 +461,10 @@ async function addFiles(list){
      id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+i+'-'+Math.random(),
      file:f,name:f.name,size:f.size,url:imageData||URL.createObjectURL(f),imageData,
      status:'queued',classification:'queued',reason:'Waiting to be processed.',
-     text:'',rawText:'',repairedText:'',finalText:'',error:'',repairs:[],validationWarnings:[],validationDetails:[],mathRenderWarnings:[],history:[],
+     text:'',rawText:'',repairedText:'',finalText:'',error:'',repairs:[],validationWarnings:[],validationDetails:[],mathRenderWarnings:[],history:[],reviewFlags:[],
      primaryAttempts:0,secondaryAttempts:0,failures:0,lastError:'',truncated:false,stopReason:'',
-     viewMode:'final',compareOpen:false,editingSnapshotTaken:false,imageHash:'',lastFingerprint:'',lastAttemptId:''
+     viewMode:'final',compareOpen:false,editingSnapshotTaken:false,imageHash:'',lastFingerprint:'',lastAttemptId:'',
+     imageRotation:0,imageZoom:1,imageFit:'page',approvalAt:'',needsReapproval:false
    });
    try{state.items[state.items.length-1].imageHash=await imageHashForFile(f)}catch(e){}
 
@@ -647,7 +667,7 @@ function classifyText(text){
 }
 
 function stats(){
- const counts={total:state.items.length,good:0,review:0,unclear:0,mathunsure:0,approved:0,failed:0,queued:0,running:0,interrupted:0};
+ const counts={total:state.items.length,good:0,review:0,unclear:0,mathunsure:0,approved:0,needsreapproval:0,failed:0,queued:0,running:0,interrupted:0};
  state.items.forEach(i=>{
    if(i.status==='running')counts.running++;
    else if(i.status==='queued')counts.queued++;
@@ -664,7 +684,7 @@ function visibleItems(){
  return state.items.filter(i=>i.classification===state.filter || (state.filter==='queued'&&i.status==='queued') || (state.filter==='interrupted'&&i.status==='interrupted'));
 }
 function badgeClass(i){return i.status==='running'?'running':i.status==='queued'?'queued':i.status==='interrupted'?'interrupted':i.classification}
-function badgeLabel(i){return i.status==='running'?'Running':i.status==='queued'?'Queued':i.status==='interrupted'?'Interrupted':({good:'Good',review:'Review',unclear:'Unclear',mathunsure:'Math Unsure',approved:'Approved',failed:'Failed',interrupted:'Interrupted'})[i.classification]||i.classification}
+function badgeLabel(i){return i.status==='running'?'Running':i.status==='queued'?'Queued':i.status==='interrupted'?'Interrupted':({good:'Good',review:'Review',unclear:'Unclear',mathunsure:'Math Unsure',approved:'Approved',needsreapproval:'Needs Reapproval',failed:'Failed',interrupted:'Interrupted'})[i.classification]||i.classification}
 function pushRevision(i,label){
  if(!(i.rawText||i.repairedText||i.finalText||i.text))return;
  i.history=i.history||[];
@@ -688,9 +708,47 @@ function versionText(i,mode){
  if(mode==='repaired')return i.repairedText||'';
  return i.finalText||i.text||'';
 }
+function currentGuidedList(){return visibleItems()}
+function syncGuidedItem(list){
+ if(!state.guidedReview)return;
+ if(!list.length){state.guidedItemId=null;return}
+ if(!list.some(x=>x.id===state.guidedItemId))state.guidedItemId=list[0].id;
+}
+function markNeedsReapproval(i,reason){
+ if(!i)return;
+ if(i.classification==='approved'||i.needsReapproval){
+   i.classification='needsreapproval';
+   i.status='done';
+   i.needsReapproval=true;
+   i.reason=reason||'This approved page changed and needs human reapproval.';
+ }
+}
+function reanchorReviewFlags(i,oldText,newText){
+ if(!i||!Array.isArray(i.reviewFlags))return;
+ for(const flag of i.reviewFlags){
+   if(!flag.text)continue;
+   if(newText.slice(flag.start,flag.end)===flag.text){flag.detached=false;continue}
+   const hits=[];let pos=0;
+   while((pos=newText.indexOf(flag.text,pos))!==-1){hits.push(pos);pos+=Math.max(1,flag.text.length)}
+   if(hits.length){
+     hits.sort((a,b)=>Math.abs(a-flag.start)-Math.abs(b-flag.start));
+     flag.start=hits[0];flag.end=hits[0]+flag.text.length;flag.detached=false;
+   }else flag.detached=true;
+ }
+}
 function render(){
  renderStats();
- const list=visibleItems();
+ const allList=visibleItems();
+ syncGuidedItem(allList);
+ let list=allList;
+ if(state.guidedReview&&state.guidedItemId)list=allList.filter(x=>x.id===state.guidedItemId);
+ els.results.classList.toggle('guided-review',state.guidedReview);
+ const pos=$('review-position');
+ if(pos){
+   const idx=state.guidedItemId?allList.findIndex(x=>x.id===state.guidedItemId):-1;
+   pos.textContent=state.guidedReview&&idx>=0?(idx+1)+' / '+allList.length:allList.length+' items';
+ }
+ const guideBtn=$('guided-review');if(guideBtn)guideBtn.textContent=state.guidedReview?'Exit Guided Review':'Guided Review';
  if(!list.length){els.results.innerHTML='<div class="empty">No items in this pile.</div>';return}
  els.results.innerHTML=(state.autosaveWarning?`<div class="reason"><b>Autosave:</b> ${esc(state.autosaveWarning)}</div>`:'')+list.map(i=>{
    const mode=i.viewMode||'final';
@@ -700,7 +758,15 @@ function render(){
  <section class="panel card">
   <aside class="side">
    <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}<div class="small">Attempts: Primary ${i.primaryAttempts||0} · Secondary ${i.secondaryAttempts||0} · Failures ${i.failures||0}</div>${i.imageHash?`<div class="small">Image hash: ${esc(i.imageHash.slice(0,12))}…</div>`:''}</div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
-   ${i.url?`<img class="preview" src="${i.url}" alt="${esc(i.name)}">`:'<div class="reason">Original image was not retained by browser autosave. Text/history are still available.</div>'}
+   ${i.url?`<div class="image-stage"><img id="image-${i.id}" class="preview" src="${i.url}" alt="${esc(i.name)}" style="transform:rotate(${Number(i.imageRotation||0)}deg) scale(${Number(i.imageZoom||1)});${i.imageFit==='width'?'width:100%;max-width:none;':'max-width:100%;max-height:68vh;'}"></div>
+   <div class="image-tools">
+    <button onclick="zoomImage('${i.id}',-0.15)">Zoom −</button>
+    <button onclick="zoomImage('${i.id}',0.15)">Zoom +</button>
+    <button onclick="fitImage('${i.id}','page')">Fit page</button>
+    <button onclick="fitImage('${i.id}','width')">Fit width</button>
+    <button onclick="rotateImage('${i.id}',-90)">↶ 90°</button>
+    <button onclick="rotateImage('${i.id}',90)">↷ 90°</button>
+   </div>`:'<div class="reason">Original image was not retained by browser autosave. Text/history are still available.</div>'}
    <div class="toolbar">
     ${i.classification==='approved'?'<button onclick="unapprove(\''+i.id+'\')">Unapprove</button>':`<button onclick="runSingleById('${i.id}')">Run again with Primary</button>`}
     ${i.status==='running'?`<button onclick="cancelItem('${i.id}')">Cancel request</button>`:''}
@@ -725,6 +791,12 @@ function render(){
     <button class="${mode==='final'?'active':''}" onclick="setViewMode('${i.id}','final')">View final</button>
    </div>
    ${i.reason?`<div class="reason"><b>Sorting reason:</b> ${esc(i.reason)}</div>`:''}
+   ${i.classification==='needsreapproval'?`<div class="error"><b>Needs Reapproval:</b> this page was previously approved, then its final transcription changed.</div>`:''}
+   <div class="toolbar">
+    <button onclick="addReviewFlag('${i.id}')">Flag selected text</button>
+    ${i.reviewFlags&&i.reviewFlags.length?`<span class="small">${i.reviewFlags.length} review flag${i.reviewFlags.length===1?'':'s'}</span>`:''}
+   </div>
+   ${i.reviewFlags&&i.reviewFlags.length?`<div class="review-flags">${i.reviewFlags.map(f=>`<div class="review-flag ${f.detached?'detached':''}"><b>${f.detached?'Detached flag':'Review flag'}:</b> ${esc(f.note||'Check this passage')}<code>${esc(f.text||'')}</code><button onclick="jumpReviewFlag('${i.id}','${f.id}')">Jump</button> <button onclick="removeReviewFlag('${i.id}','${f.id}')">Remove</button></div>`).join('')}</div>`:''}
    ${i.truncated?`<div class="error"><b>Possible truncated response.</b> Stop reason: ${esc(i.stopReason||'provider reported incomplete output')}.</div>`:''}
    ${i.validationWarnings&&i.validationWarnings.length?`<div class="reason"><b>LaTeX validation:</b> ${esc(i.validationWarnings.join(' • '))}</div>`:''}
    ${i.validationDetails&&i.validationDetails.length?`<div class="math-warning-list">${i.validationDetails.map(w=>`<div class="math-warning"><b>${esc(w.category)}:</b> ${esc(w.message)}<code>${esc(w.snippet||'')}</code></div>`).join('')}</div>`:''}
@@ -733,7 +805,7 @@ function render(){
    ${i.repairs&&i.repairs.length?`<div class="reason"><b>LaTeX repair log:</b> ${esc(i.repairs.join(' • '))}</div>`:''}
    ${i.error?`<div class="error">${esc(i.error)}</div>`:''}
    <div class="editorgrid">
-    <div><div class="previewtitle">Source ${mode==='final'?'(editable)':'(read only)'}</div><textarea class="output" ${mode==='final'?'':'readonly'} oninput="${mode==='final'?`editText('${i.id}',this.value)`:''}" placeholder="Extracted text will appear here.">${esc(text)}</textarea></div>
+    <div><div class="previewtitle">Source ${mode==='final'?'(editable)':'(read only)'}</div><textarea id="source-${i.id}" class="output" ${mode==='final'?'':'readonly'} oninput="${mode==='final'?`editText('${i.id}',this.value)`:''}" placeholder="Extracted text will appear here.">${esc(text)}</textarea></div>
     <div><div class="previewtitle">Live Math Preview</div><div id="preview-${i.id}" class="previewpane"></div></div>
    </div>
    ${i.compareOpen?`<div class="comparebox"><b>Current revision comparison</b><div class="small">Raw AI</div><pre>${esc(i.rawText||'')}</pre><div class="small">Repaired</div><pre>${esc(i.repairedText||'')}</pre><div class="small">Final</div><pre>${esc(i.finalText||i.text||'')}</pre>${lastPrev?`<div class="small">Previous final — ${esc(lastPrev.label||'revision')}</div><pre>${esc(lastPrev.finalText||'')}</pre>`:''}</div>`:''}
@@ -793,18 +865,45 @@ function queueMathPreview(id,text,delay=120){
  const timer=setTimeout(()=>{state.previewTimers.delete(id);renderMathPreview(id,text)},delay);
  state.previewTimers.set(id,timer);
 }
+window.zoomImage=(id,delta)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.imageZoom=Math.max(.5,Math.min(3,Number(i.imageZoom||1)+delta));scheduleAutosave();render()};
+window.rotateImage=(id,delta)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.imageRotation=((Number(i.imageRotation||0)+delta)%360+360)%360;scheduleAutosave();render()};
+window.fitImage=(id,mode)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.imageFit=mode;i.imageZoom=1;scheduleAutosave();render()};
+window.addReviewFlag=id=>{
+ const i=state.items.find(x=>x.id===id);if(!i)return;
+ const ta=$('source-'+id);if(!ta||ta.readOnly){alert('Switch to Final view to flag editable transcription text.');return}
+ const start=ta.selectionStart,end=ta.selectionEnd;
+ if(end<=start){alert('Select the transcription text you want to flag first.');return}
+ const selected=ta.value.slice(start,end);
+ const note=prompt('Review flag note:','Check this passage against the image.');
+ if(note===null)return;
+ i.reviewFlags=i.reviewFlags||[];
+ i.reviewFlags.push({id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random(),start,end,text:selected,note:note.trim()||'Check this passage against the image.',createdAt:new Date().toISOString(),detached:false});
+ if(i.classification==='approved')markNeedsReapproval(i,'A review flag was added to an approved page; reapproval is required.');
+ scheduleAutosave();render();
+};
+window.jumpReviewFlag=(id,flagId)=>{
+ const i=state.items.find(x=>x.id===id),f=i?.reviewFlags?.find(x=>x.id===flagId);if(!i||!f)return;
+ i.viewMode='final';render();
+ setTimeout(()=>{const ta=$('source-'+id);if(!ta)return;if(f.detached){const p=ta.value.indexOf(f.text);if(p>=0){f.start=p;f.end=p+f.text.length;f.detached=false}}ta.focus();ta.setSelectionRange(Math.max(0,f.start||0),Math.max(0,f.end||0));},0);
+};
+window.removeReviewFlag=(id,flagId)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.reviewFlags=(i.reviewFlags||[]).filter(x=>x.id!==flagId);scheduleAutosave();render()};
 window.setViewMode=(id,mode)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.viewMode=mode;render()};
 window.toggleCompare=id=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.compareOpen=!i.compareOpen;render()};
 window.editText=(id,v)=>{
  const i=state.items.find(x=>x.id===id); if(!i)return;
+ const oldText=i.finalText||i.text||'';
  if(!i.editingSnapshotTaken){pushRevision(i,'Before manual edit');i.editingSnapshotTaken=true}
+ reanchorReviewFlags(i,oldText,v);
+ const wasApproved=i.classification==='approved'||i.needsReapproval;
  i.finalText=v;i.text=v;
- if(i.status==='done'&&i.classification!=='approved'){
-   const c=classifyText(v);
-   i.classification=c.classification;
-   i.reason='Reclassified after manual text edit: '+c.reason;
-   i.validationWarnings=latexStructuralWarnings(v);
-   i.validationDetails=latexValidationDetails(v);
+ i.validationWarnings=latexStructuralWarnings(v);
+ i.validationDetails=latexValidationDetails(v);
+ if(wasApproved){
+   markNeedsReapproval(i,'Final transcription changed after approval; human reapproval is required.');
+ }else if(i.status==='done'){
+   const cl=classifyText(v);
+   i.classification=cl.classification;
+   i.reason='Reclassified after manual text edit: '+cl.reason;
  }
  queueMathPreview(id,v);
  scheduleAutosave();renderStats();
@@ -814,14 +913,15 @@ window.manualClass=(id,c)=>{
  pushRevision(i,c==='approved'?'Before approval':'Before manual classification');
  i.classification=c;i.status=c==='failed'?'error':'done';
  i.reason=c==='approved'?'Human reviewed and approved this page.':'Manually assigned to '+c+'.';
- if(c==='approved')i.error='';
+ if(c==='approved'){i.error='';i.approvalAt=new Date().toISOString();i.needsReapproval=false}
+ else if(c!=='needsreapproval')i.needsReapproval=false;
  i.editingSnapshotTaken=false;scheduleAutosave();render()
 };
 window.unapprove=id=>{
  const i=state.items.find(x=>x.id===id);if(!i)return;
  pushRevision(i,'Approved revision');
  const c=classifyText(i.finalText||i.text||'');
- i.classification=c.classification;i.status='done';i.reason='Unapproved for further review. '+c.reason;
+ i.classification=c.classification;i.status='done';i.reason='Unapproved for further review. '+c.reason;i.needsReapproval=false;
  scheduleAutosave();render();
 };
 window.restorePrevious=id=>{
@@ -832,7 +932,7 @@ window.restorePrevious=id=>{
  i.classification=prev.classification||'review';i.reason=prev.reason||'Restored previous transcription.';
  i.lastProvider=prev.lastProvider;i.lastModel=prev.lastModel;i.lastPass=prev.lastPass;
  i.truncated=!!prev.truncated;i.stopReason=prev.stopReason||'';
- i.status=i.classification==='failed'?'error':'done';i.error='';i.editingSnapshotTaken=false;
+ i.status=i.classification==='failed'?'error':'done';i.error='';i.editingSnapshotTaken=false;i.needsReapproval=i.classification==='needsreapproval';
  scheduleAutosave();render();
 };
 window.cancelItem=id=>{
@@ -1017,8 +1117,32 @@ $('doctor').onclick=()=>runDoctor();
 
 $('tabs').onclick=e=>{
  const b=e.target.closest('button[data-filter]');if(!b)return;
- state.filter=b.dataset.filter;document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===b));render();
+ state.filter=b.dataset.filter;state.guidedItemId=null;document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===b));render();
 };
+function navigateGuided(delta){
+ const list=currentGuidedList();if(!list.length)return;
+ let idx=list.findIndex(x=>x.id===state.guidedItemId);if(idx<0)idx=0;
+ idx=Math.max(0,Math.min(list.length-1,idx+delta));
+ state.guidedItemId=list[idx].id;render();window.scrollTo({top:document.querySelector('#results')?.offsetTop||0,behavior:'smooth'});
+}
+$('guided-review').onclick=()=>{state.guidedReview=!state.guidedReview;if(state.guidedReview&&!state.guidedItemId){const list=currentGuidedList();state.guidedItemId=list[0]?.id||null}render()};
+$('review-prev').onclick=()=>navigateGuided(-1);
+$('review-next').onclick=()=>navigateGuided(1);
+window.runSingleSecondaryById=async id=>{if(state.running)return;const i=state.items.find(x=>x.id===id);if(!i)return;if(i.classification==='approved'){alert('Unapprove this page before retrying it.');return}const s=snapSecondary();if(!validateSnap(s))return;await runOne(i,s,{forceFresh:true})};
+document.addEventListener('keydown',e=>{
+ if(!state.guidedReview)return;
+ const tag=(e.target?.tagName||'').toUpperCase();if(tag==='TEXTAREA'||tag==='INPUT'||tag==='SELECT')return;
+ const i=state.items.find(x=>x.id===state.guidedItemId);if(!i)return;
+ if(e.key==='ArrowLeft'){e.preventDefault();navigateGuided(-1)}
+ else if(e.key==='ArrowRight'){e.preventDefault();navigateGuided(1)}
+ else if(e.key==='Escape'){state.guidedReview=false;render()}
+ else if(e.key.toLowerCase()==='a'){e.preventDefault();window.manualClass(i.id,'approved')}
+ else if(e.key.toLowerCase()==='r'){e.preventDefault();window.manualClass(i.id,'review')}
+ else if(e.key.toLowerCase()==='u'){e.preventDefault();window.manualClass(i.id,'unclear')}
+ else if(e.key.toLowerCase()==='m'){e.preventDefault();window.manualClass(i.id,'mathunsure')}
+ else if(e.key==='1'){e.preventDefault();window.runSingleById(i.id)}
+ else if(e.key==='2'){e.preventDefault();window.runSingleSecondaryById(i.id)}
+});
 
 function download(name,content){
  const blob=new Blob([content],{type:'text/plain;charset=utf-8'}),u=URL.createObjectURL(blob),a=document.createElement('a');
