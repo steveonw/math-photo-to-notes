@@ -723,31 +723,81 @@ Acceptance criteria:
 
 ## Release C — External AI Round Trip
 
-Ship export and import together.
+**Status:** Implemented on 2026-09-30.
 
-1. problem-page selection
-2. chat-friendly chunking
-3. generated external-review prompt
-4. stable page-ID return schema
-5. tolerant import parser
-6. import report
-7. mandatory diff UI
-8. Accept / Reject / Edit proposal
-9. revision + provenance recording
-10. deterministic revalidation after acceptance
-11. Needs Reapproval protection
+Export and import ship together.
 
-### Acceptance criteria
+Implemented:
 
-- importing data never changes final text before human acceptance
-- unknown/missing/malformed pages are reported
-- external AI cannot set Approved or any pile directly
-- accepted corrections preserve earlier final text
-- round-trip is covered by browser tests
+1. **Review with External AI** is available from completed-batch summaries and Project / Export controls
+2. eligible pages include Review / Math Unsure / Unclear / Needs Reapproval / Needs Refresh plus Failed pages that still have usable image/transcription evidence
+3. Interrupted transport-only pages are excluded from the normal external-review scope
+4. external review packages are chunked at 5 / 10 / 20 pages, default 10
+5. each chunk receives a stable package ID and persisted expected page-ID list
+6. each chunk ZIP contains:
+   - source images where retained
+   - stable page IDs
+   - current final transcription
+   - raw transcription where useful
+   - deterministic warnings
+   - Math Unsure details
+   - page state/reason and metadata
+   - `manifest.json`
+   - ready-made `review-prompt.txt`
+   - exact `return-template.json`
+7. generated prompts explicitly prohibit external approval, application classification, invented page IDs, silent uncertainty removal, and unrelated stylistic rewriting
+8. requested return data contains only package ID, page ID, proposed corrected text, and optional note
+9. exported package history persists in the project so returned package IDs can be matched to expected pages
+10. importer tolerates raw JSON, Markdown JSON fences, prose before/after JSON, arrays, `{ "pages": [...] }`, and unknown extra fields
+11. importer reports matched, unknown, duplicate, malformed, and expected-but-missing pages
+12. empty corrected text is rejected as malformed
+13. external classification fields are ignored and never enter internal proposal state
+14. importing creates pending proposals only; it does not modify page text or classification
+15. every proposal is shown source image + current final + proposed external text + visible diff
+16. proposal text is read-only until the human explicitly chooses **Edit proposal**
+17. required decisions are **Accept**, **Reject**, or **Edit**
+18. pending proposal sessions persist through autosave / project Save/Open and can be closed and resumed
+19. accepted text:
+   - preserves the previous final transcription as a revision when text actually changes
+   - stores external proposal and accepted text in provenance
+   - records package/source/import/decision timestamps
+   - re-runs conservative LaTeX repair and deterministic classification
+   - re-anchors review flags and targeted-region dependencies
+   - preserves Needs Refresh rules
+   - changes Approved / Needs Reapproval lineage to Needs Reapproval when text actually changes
+   - never auto-Approves
+20. accepting a no-op proposal does not unnecessarily invalidate approval
+21. rejected proposals preserve current final text and record rejection provenance
+22. external correction counts are included in the audit manifest and Doctor
+23. external package export history is included in project archives
+24. browser CI verifies:
+   - stable package/return IDs
+   - no requested classification field
+   - tolerant fenced/prose parsing
+   - no page mutation before acceptance
+   - matched / unknown / missing reporting
+   - mandatory diff review
+   - editable proposal acceptance
+   - revision/provenance preservation
+   - external AI cannot approve
+   - Approved → Needs Reapproval after a changed accepted correction
+   - Reject leaves final text unchanged
+
+Acceptance criteria:
+
+- export and import are shipped as one complete workflow
+- outside AI can propose text but cannot directly control application state
+- importing alone cannot alter final text
+- every accepted change is human-reviewed through a visible diff
+- accepted changes preserve earlier transcription history and approval lineage
+- malformed/unknown/missing/duplicate return data is reported instead of silently swallowed
+- browser smoke tests cover accept, reject, and Approved-lineage behavior
+
+**Next active release:** Release D — High Assurance Math.
 
 ---
 
-## Release D — High Assurance Math
+## Release D — High Assurance Math## Release D — High Assurance Math
 
 1. math-heavy deterministic trigger signals
 2. configurable verification policy
