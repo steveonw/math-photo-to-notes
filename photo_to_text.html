@@ -1051,6 +1051,7 @@ function renderRegionCard(page,region){
     <button onclick="runRegionPass('${page.id}','${region.id}','primary')">Retry crop Primary</button>
     <button onclick="runRegionPass('${page.id}','${region.id}','secondary')">Retry crop Secondary</button>
     <button onclick="runRegionComparison('${page.id}','${region.id}')">Compare Primary + Secondary</button>
+    <button class="review-package" onclick="exportRegionReviewPackage('${page.id}','${region.id}')">Region package ZIP</button>
     ${passes.length?`<button onclick="cancelRegionRequests('${page.id}','${region.id}')">Cancel region request</button>`:''}
     <button onclick="deleteRegion('${page.id}','${region.id}')">Delete region</button>
    </div>
@@ -1128,6 +1129,7 @@ function render(){
     ${i.status==='running'?`<button onclick="cancelItem('${i.id}')">Cancel request</button>`:''}
     ${i.history&&i.history.length?`<button onclick="restorePrevious('${i.id}')">Restore previous</button>`:''}
     <button onclick="toggleCompare('${i.id}')">Compare versions</button>
+    <button class="review-package" onclick="exportPageReviewPackage('${i.id}')">Review package ZIP</button>
     <button onclick="removeById('${i.id}')">Remove</button>
    </div>
    <div class="manual">
@@ -2223,6 +2225,72 @@ function auditManifest(list=state.items){
    }))
  };
 }
+
+function imageExtensionFromDataUrl(dataUrl,name='image'){
+ const mime=(String(dataUrl||'').match(/^data:([^;]+)/)||[])[1]||'';
+ if(/png/i.test(mime))return '.png';if(/webp/i.test(mime))return '.webp';if(/gif/i.test(mime))return '.gif';if(/bmp/i.test(mime))return '.bmp';if(/heic|heif/i.test(mime))return '.heic';if(/jpeg|jpg/i.test(mime))return '.jpg';
+ const m=String(name||'').match(/\.[A-Za-z0-9]{2,5}$/);return m?m[0].toLowerCase():'.jpg';
+}
+function jsonBytes(v){return utf8Bytes(JSON.stringify(v,null,2))}
+async function archiveEntriesForPages(list,{includeProject=false}={}){
+ const entries=[];
+ entries.push({name:'README.txt',bytes:utf8Bytes('Math Photo to Notes portable archive\nGenerated: '+new Date().toISOString()+'\n\nAPI keys are intentionally excluded.\n')});
+ entries.push({name:'audit-manifest.json',bytes:jsonBytes(auditManifest(list))});
+ entries.push({name:'usage-report.json',bytes:jsonBytes(buildUsageReport(list))});
+ entries.push({name:'exports/combined.md',bytes:utf8Bytes(mdFor(list.filter(i=>i.text)))});
+ entries.push({name:'exports/combined.txt',bytes:utf8Bytes(plainTextFor(list.filter(i=>i.text)))});
+ entries.push({name:'exports/combined.tex',bytes:utf8Bytes(texFor(list.filter(i=>i.text)))});
+ if(includeProject)entries.push({name:'project.json',bytes:jsonBytes(projectEnvelope(true))});
+ for(let idx=0;idx<list.length;idx++){
+   const i=list[idx],base='pages/'+String(idx+1).padStart(4,'0')+'-'+slug(i.metadata?.title||i.name)+'/';
+   const pageRecord=serializableItem(i,false);
+   entries.push({name:base+'page.json',bytes:jsonBytes(pageRecord)});
+   entries.push({name:base+'raw.txt',bytes:utf8Bytes(i.rawText||'')});
+   entries.push({name:base+'repaired.txt',bytes:utf8Bytes(i.repairedText||'')});
+   entries.push({name:base+'final.md',bytes:utf8Bytes(i.finalText||i.text||'')});
+   entries.push({name:base+'revisions.json',bytes:jsonBytes(i.history||[])});
+   entries.push({name:base+'review-flags.json',bytes:jsonBytes(i.reviewFlags||[])});
+   entries.push({name:base+'routing-history.json',bytes:jsonBytes(i.routingHistory||[])});
+   entries.push({name:base+'usage-log.json',bytes:jsonBytes(i.usageLog||[])});
+   const image=await itemImageData(i);
+   if(image){const d=dataUrlBytes(image);entries.push({name:base+'original'+imageExtensionFromDataUrl(image,i.name),bytes:d.bytes})}
+   for(let rix=0;rix<(i.regions||[]).length;rix++){
+     const region=i.regions[rix],rbase=base+'regions/'+String(rix+1).padStart(3,'0')+'-'+safeFilePart(region.note||region.id,'region')+'/';
+     const clean={...region};delete clean.cropDataUrl;delete clean.runningPasses;
+     entries.push({name:rbase+'region.json',bytes:jsonBytes(clean)});
+     if(region.cropDataUrl){const d=dataUrlBytes(region.cropDataUrl);entries.push({name:rbase+'crop'+imageExtensionFromDataUrl(region.cropDataUrl,'crop.jpg'),bytes:d.bytes})}
+     for(let q=0;q<(region.results||[]).length;q++){
+       const res=region.results[q],prefix=rbase+'results/'+String(q+1).padStart(3,'0')+'-'+safeFilePart(res.pass+'-'+res.model,'result');
+       entries.push({name:prefix+'.json',bytes:jsonBytes(res)});
+       entries.push({name:prefix+'.txt',bytes:utf8Bytes(res.repairedText||res.rawText||'')});
+     }
+   }
+ }
+ return entries;
+}
+async function exportProjectArchive(){
+ if(state.running||state.activeControllers.size){alert('Finish active AI requests before building an archive.');return}
+ const entries=await archiveEntriesForPages(state.items,{includeProject:true});
+ downloadBlob('math-photo-notes-archive-'+new Date().toISOString().slice(0,10)+'.zip',buildStoreZip(entries));
+}
+window.exportPageReviewPackage=async id=>{
+ const page=state.items.find(x=>x.id===id);if(!page)return;
+ const entries=await archiveEntriesForPages([page],{includeProject:false});
+ entries.push({name:'review-instructions.txt',bytes:utf8Bytes('Review this page against the included original image, final transcription, revision history, flags, and targeted-region evidence. No API keys are included.\n')});
+ downloadBlob('page-review-'+slug(page.metadata?.title||page.name)+'.zip',buildStoreZip(entries));
+};
+window.exportRegionReviewPackage=async(pageId,regionId)=>{
+ const page=state.items.find(x=>x.id===pageId),region=page?.regions?.find(x=>x.id===regionId);if(!page||!region)return;
+ const entries=[];
+ const clean={...region};delete clean.cropDataUrl;delete clean.runningPasses;
+ entries.push({name:'region.json',bytes:jsonBytes(clean)});
+ entries.push({name:'page-context.json',bytes:jsonBytes({id:page.id,name:page.name,metadata:page.metadata,classification:page.classification,reason:page.reason,document:documentName(page.documentId),anchor:region.anchor||null,finalText:page.finalText||page.text||''})});
+ if(region.cropDataUrl){const d=dataUrlBytes(region.cropDataUrl);entries.push({name:'crop'+imageExtensionFromDataUrl(region.cropDataUrl,'crop.jpg'),bytes:d.bytes})}
+ for(let q=0;q<(region.results||[]).length;q++){const res=region.results[q];entries.push({name:'results/'+String(q+1).padStart(3,'0')+'-'+safeFilePart(res.pass+'-'+res.model)+'.json',bytes:jsonBytes(res)})}
+ entries.push({name:'review-instructions.txt',bytes:utf8Bytes('Compare the included crop and candidate targeted transcriptions. Model disagreement is evidence for human review; this package does not designate an automatic winner.\n')});
+ downloadBlob('region-review-'+slug(page.name)+'-'+slug(region.note||region.id)+'.zip',buildStoreZip(entries));
+};
+$('archive-project').onclick=()=>exportProjectArchive();
 
 async function exportProjectJson(){
  await saveProjectState();
