@@ -973,6 +973,8 @@ Do not recompute an entire page when only one region needs another pass unless t
 
 ## Phase H — Export and Archival
 
+**Status:** Implemented in Upgrade 10 on 2026-09-30.
+
 1. Markdown export
 2. `.tex` export
 3. MathJax PDF
@@ -981,6 +983,21 @@ Do not recompute an entire page when only one region needs another pass unless t
 6. usage/cost report
 7. portable per-page/per-equation review packages
 8. provenance/audit manifest
+
+Implemented behavior:
+
+- explicit Save Project / Open Project using the v1 project envelope
+- exported settings exclude API keys
+- archive ZIP is generated locally with a dependency-free store-only ZIP writer
+- archive contains project JSON, audit/usage manifests, combined exports, originals, page lineage, and targeted-region evidence
+- per-page and per-region portable review ZIPs
+- plain-text and LaTeX combined exports
+- whole-page and region usage normalization
+- user-entered Primary/Secondary input/output token rates
+- live estimated cost summary
+- standalone usage and audit JSON exports
+
+Cost estimation is advisory only and must not be presented as billing truth.
 
 ## Phase I — Optional High-Accuracy Workflows
 
@@ -995,7 +1012,7 @@ Avoid autonomous multi-agent orchestration where deterministic application logic
 
 # Current Implementation Snapshot
 
-As of 2026-09-30, Upgrades 1–9 are implemented or substantially implemented in `photo_to_text.html`.
+As of 2026-09-30, Upgrades 1–10 are implemented or substantially implemented in `photo_to_text.html`.
 
 Current architecture includes:
 
@@ -1036,10 +1053,17 @@ Current architecture includes:
 - Needs Refresh state and pile
 - explicit Apply preferred / Keep current dependency resolution
 - approval-lineage preservation after targeted changes
+- explicit project JSON Save/Open
+- dependency-free portable project ZIP archive
+- per-page and per-region review-package ZIPs
+- combined Markdown / plain text / LaTeX exports
+- normalized usage report and user-configurable rate estimates
+- provenance/audit manifest
+- export regression tests guarding API-key leakage
 
 A stale duplicated HTML tail discovered during Upgrade 7 was removed so the repository again contains one canonical HTML document.
 
-The next active development target is **Upgrade 10 — Export / Archive / Review Packages**.
+The numbered Upgrade 1–10 roadmap is complete. Remaining work is tracked as hardening and optional high-accuracy follow-up.
 
 ---
 
@@ -1164,17 +1188,46 @@ Current limitation: targeted in-flight requests are cancellable but are not them
 ### Upgrade 10
 Full archive/export system + portable review packages + usage/cost reporting.
 
-**Status:** Next active milestone.
+**Status:** Implemented on 2026-09-30.
 
-Planned scope:
+Implemented capabilities:
 
-- explicit versioned project Save/Open
-- archive/ZIP export including original images and transcription lineage
-- portable per-page and per-region review packages
-- Markdown / plain-text / LaTeX export expansion
-- usage summary and user-configurable cost estimation
-- provenance/audit manifest
-- never include API keys in exported artifacts
+- explicit versioned Save Project / Open Project
+- current `math-photo-notes-project-v1` envelope exported with retained image data
+- safe provider/model/routing/project settings without API keys
+- active processing must be stopped before project replacement
+- restored durable whole-page queues reopen paused
+- dependency-free in-browser ZIP archive generation
+- archive includes project JSON, original images, raw/repaired/final text, revisions, flags, routing history, targeted crops/results/provenance, audit manifest, usage report, and combined exports
+- per-page Review package ZIP
+- per-region Review package ZIP
+- combined plain-text and LaTeX export in addition to Markdown/PDF
+- provider usage-field normalization
+- separate user-configurable Primary/Secondary input/output rates
+- live estimated usage/cost summary
+- standalone usage-report JSON
+- standalone audit-manifest JSON
+- regression checks that safe settings and audit exports omit API-key fields
+
+Known limitations:
+
+- ZIP entries are stored without compression and archives are assembled in browser memory
+- usage/cost estimates depend on provider metadata and user-entered rates
+- future project schema versions still need explicit migration functions
+- in-flight targeted-region requests are cancellable but not durable across reload
+
+## Roadmap status
+
+Upgrades 1–10 are complete.
+
+Recommended follow-up backlog:
+
+1. durable queue jobs for targeted-region requests
+2. future-schema migration framework
+3. larger checked-in regression fixture corpus
+4. self-host/bundle MathJax
+5. optional independent Math Verifier workflow
+6. streaming/compressed archive support for very large projects
 
 ---
 
