@@ -215,6 +215,8 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
       <b>External AI review</b>
       <span class="small">Pages/package:</span>
       <select id="external-chunk-size"><option value="5">5</option><option value="10" selected>10</option><option value="20">20</option></select>
+      <span class="small">Format:</span>
+      <select id="external-review-format"><option value="zip" selected>ZIP package</option><option value="loose">Loose images + text</option></select>
       <button id="external-review-export">Export problem pages</button>
       <button id="external-review-import">Import corrections</button>
       <button id="external-review-resume" disabled>Review pending</button>
@@ -2368,6 +2370,8 @@ async function runA2SelfTests(){
  const normalized=normalizeExternalCorrectionPayload({package_id:'p1',pages:[{page_id:'x',corrected_text:'new',classification:'approved'},{page_id:'x',corrected_text:'duplicate'},{page_id:'z',corrected_text:'unknown'}]},'test.json');
  test('external import matches known IDs and reports duplicate/unknown/missing',normalized.report.matched===1&&normalized.report.duplicates.length===1&&normalized.report.unknown.length===1&&normalized.report.missingExpected.join(',')==='y');
  test('external AI classification fields do not enter proposals',!('classification' in normalized.proposals[0]));
+ const looseContext=externalReviewLooseContext({id:'loose-test',pageIds:['x']},state.items.slice(0,1));
+ test('loose external review context carries package and stable page IDs',looseContext.includes('loose-test')&&looseContext.includes('=== SOURCE PAGE x ==='));
  state.externalReviewExports=oldExports;state.items=oldExternalItems;
  return {passed:tests.filter(x=>x.ok).length,total:tests.length,tests};
 }
@@ -2779,24 +2783,64 @@ async function buildExternalReviewPackageEntries(pkg,pages){
  }
  return entries;
 }
+function externalReviewLooseContext(pkg,pages){
+ const parts=[externalReviewPrompt(pkg),'','===== PAGE CONTEXT ====='];
+ for(const i of pages){
+   const p=externalReviewPagePayload(i);
+   parts.push(
+     '',
+     '=== SOURCE PAGE '+p.page_id+' ===',
+     'Name: '+(p.name||''),
+     'Document: '+(p.document||''),
+     'Current state: '+(p.current_state||''),
+     'Reason: '+(p.reason||''),
+     p.validation_warnings?.length?'Warnings: '+p.validation_warnings.join(' | '):'Warnings: none',
+     '',
+     'CURRENT TRANSCRIPTION:',
+     p.current_text||'',
+     p.raw_text?'\nRAW PROVIDER TEXT:\n'+p.raw_text:'',
+     '=== END SOURCE PAGE ==='
+   );
+ }
+ return parts.join('\n');
+}
+async function downloadExternalReviewLoose(pkg,pages,chunkIndex,chunkCount){
+ const base='external-ai-review-'+String(chunkIndex).padStart(2,'0')+'-of-'+String(chunkCount).padStart(2,'0');
+ download(base+'-context.txt',externalReviewLooseContext(pkg,pages),'text/plain;charset=utf-8');
+ let images=0;
+ for(let idx=0;idx<pages.length;idx++){
+   const i=pages[idx],image=await itemImageData(i);if(!image)continue;
+   const d=dataUrlBytes(image),ext=imageExtensionFromDataUrl(image,i.name);
+   downloadBlob(base+'-'+String(idx+1).padStart(2,'0')+'-'+safeFilePart(i.id,'page')+'-'+slug(i.name)+ext,new Blob([d.bytes],{type:d.mime}));
+   images++;
+   if(idx<pages.length-1)await new Promise(resolve=>setTimeout(resolve,100));
+ }
+ return images;
+}
 async function exportExternalReviewPackages(pageIds=null){
  if(state.running||state.activeControllers.size||state.queuePlan){alert('Finish or cancel active processing before exporting an external-AI review package.');return []}
  const pages=externalProblemPages(pageIds);
  if(!pages.length){alert('There are no eligible problem pages in this scope to send for external review.');return []}
  const chunkSize=Math.max(1,Math.min(20,Number($('external-chunk-size')?.value||10)));
+ const format=$('external-review-format')?.value==='loose'?'loose':'zip';
  const chunks=[];for(let n=0;n<pages.length;n+=chunkSize)chunks.push(pages.slice(n,n+chunkSize));
  const exported=[];
  for(let n=0;n<chunks.length;n++){
    const group=chunks[n],id='ext-'+new Date().toISOString().replace(/[-:.TZ]/g,'').slice(0,14)+'-'+String(n+1).padStart(2,'0')+'-'+Math.random().toString(36).slice(2,7);
-   const pkg={id,createdAt:new Date().toISOString(),pageIds:group.map(i=>i.id),chunkIndex:n+1,chunkCount:chunks.length,scope:Array.isArray(pageIds)?'batch':'project'};
+   const pkg={id,createdAt:new Date().toISOString(),pageIds:group.map(i=>i.id),chunkIndex:n+1,chunkCount:chunks.length,scope:Array.isArray(pageIds)?'batch':'project',format};
    state.externalReviewExports.push(pkg);if(state.externalReviewExports.length>100)state.externalReviewExports.shift();
-   const entries=await buildExternalReviewPackageEntries(pkg,group);
-   downloadBlob('external-ai-review-'+String(n+1).padStart(2,'0')+'-of-'+String(chunks.length).padStart(2,'0')+'.zip',buildStoreZip(entries));
+   if(format==='loose'){
+     pkg.looseImageCount=await downloadExternalReviewLoose(pkg,group,n+1,chunks.length);
+   }else{
+     const entries=await buildExternalReviewPackageEntries(pkg,group);
+     downloadBlob('external-ai-review-'+String(n+1).padStart(2,'0')+'-of-'+String(chunks.length).padStart(2,'0')+'.zip',buildStoreZip(entries));
+   }
    exported.push(pkg);
    if(n<chunks.length-1)await new Promise(resolve=>setTimeout(resolve,180));
  }
  scheduleAutosave();render();
- if(chunks.length>1)alert('Created '+chunks.length+' external-AI review packages. Your browser may ask permission for multiple downloads.');
+ if(format==='loose')alert('Loose review export created one context text file plus source images for each chunk. Your browser may ask permission for multiple downloads. Select all of those files together when uploading to a chat AI.');
+ else if(chunks.length>1)alert('Created '+chunks.length+' external-AI review packages. Your browser may ask permission for multiple downloads.');
  return exported;
 }
 function parseDelimitedExternalCorrections(raw){
