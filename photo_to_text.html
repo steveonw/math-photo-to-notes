@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Batch Photo to Text — Sorted Review Piles</title>
+<style>
+:root{
+  --bg:#f4f4f5;--card:#fff;--text:#18181b;--muted:#71717a;--line:#e4e4e7;
+  --accent:#111827;--good:#047857;--goodbg:#ecfdf5;--review:#7c3aed;--reviewbg:#f5f3ff;
+  --unclear:#b45309;--unclearbg:#fffbeb;--failed:#b91c1c;--failedbg:#fef2f2;
+  --queued:#52525b;--running:#1d4ed8;--runningbg:#eff6ff
+}
+*{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
+.app{max-width:1450px;margin:auto;padding:22px}.panel{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:20px;margin-bottom:18px}
+h1{margin:0 0 8px;font-size:32px}.sub{color:var(--muted);max-width:960px}.top{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+.box{border:1px solid var(--line);border-radius:16px;padding:16px}.drop{border:2px dashed #d4d4d8;border-radius:16px;padding:36px;text-align:center;cursor:pointer;background:#fafafa}
+label{display:block;margin:10px 0}.label{display:block;font-size:12px;font-weight:700;margin-bottom:5px}
+input,select,textarea,button{font:inherit} input,select,textarea{width:100%;padding:10px 11px;border:1px solid #d4d4d8;border-radius:12px;background:#fff}
+textarea{min-height:145px;resize:vertical}.toolbar{display:flex;flex-wrap:wrap;gap:9px;margin-top:14px}
+button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius:12px;font-weight:700;cursor:pointer}button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}button:disabled{opacity:.5;cursor:not-allowed}
+.stats{display:grid;grid-template-columns:repeat(7,1fr);gap:9px;margin-top:16px}.stat{border:1px solid var(--line);border-radius:14px;padding:11px}.stat b{font-size:23px;display:block}.stat span{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+.pile-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}.pile-tabs button.active{background:#111827;color:#fff}
+.card{display:grid;grid-template-columns:280px 1fr;overflow:hidden;padding:0}.side{padding:16px;border-right:1px solid var(--line);background:#fafafa}.main{padding:16px}
+.preview{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:14px;border:1px solid var(--line);margin-top:12px}.name{font-weight:800;word-break:break-word}.small{font-size:12px;color:var(--muted)}
+.badge{display:inline-block;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;border:1px solid var(--line)}
+.badge.good{color:var(--good);background:var(--goodbg)}.badge.review{color:var(--review);background:var(--reviewbg)}.badge.unclear{color:var(--unclear);background:var(--unclearbg)}.badge.mathunsure{color:#9a3412;background:#fff7ed}
+.badge.failed{color:var(--failed);background:var(--failedbg)}.badge.running{color:var(--running);background:var(--runningbg)}.badge.queued{color:var(--queued);background:#f4f4f5}
+.output{width:100%;min-height:380px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.55}.reason{margin:8px 0 12px;padding:9px 11px;border:1px solid var(--line);border-radius:11px;background:#fafafa;font-size:12px}
+.error{background:var(--failedbg);color:var(--failed);padding:10px;border-radius:11px;margin:8px 0;white-space:pre-wrap}
+.hidden{display:none!important}.empty{text-align:center;padding:45px;color:var(--muted)}
+.manual{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.manual button{padding:7px 9px;font-size:12px}
+@media(max-width:900px){.top,.card{grid-template-columns:1fr}.side{border-right:0;border-bottom:1px solid var(--line)}.stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+
+</head>
+<body>
+<div class="app">
+<section class="panel">
+  <h1>Batch Photo → Text, with review piles</h1>
+  <div class="sub">A modified standalone version of the study-suite Photo to Text workflow. Results are automatically sorted into <b>Good</b>, <b>Review</b>, <b>Unclear</b>, <b>Math Unsure</b>, or <b>Failed</b>. You can override any classification manually. PDF export renders LaTeX-style math with <b>MathJax</b> before opening the browser print/save-to-PDF dialog. Math-uncertain items also include a readable <b>(I think it says: …)</b> guess beside the structured uncertainty marker. A conservative <b>EquationWright-style LaTeX repair pass</b> fixes common rendering artifacts before MathJax/PDF export and records what it changed.</div>
+
+  <div class="stats">
+    <div class="stat"><span>Images</span><b id="s-total">0</b></div>
+    <div class="stat"><span>Good</span><b id="s-good">0</b></div>
+    <div class="stat"><span>Review</span><b id="s-review">0</b></div>
+    <div class="stat"><span>Unclear</span><b id="s-unclear">0</b></div>
+    <div class="stat"><span>Math Unsure</span><b id="s-mathunsure">0</b></div>
+    <div class="stat"><span>Failed</span><b id="s-failed">0</b></div>
+    <div class="stat"><span>Queued</span><b id="s-queued">0</b></div>
+    <div class="stat"><span>Running</span><b id="s-running">0</b></div>
+  </div>
+
+  <div class="top">
+    <div class="box">
+      <b>Upload images</b>
+      <div id="drop" class="drop" style="margin-top:10px">
+        <div><b>Drop photos here or click to browse</b></div>
+        <div class="small">PNG, JPG, WEBP, GIF, BMP, HEIC if supported by your browser</div>
+      </div>
+      <input id="files" type="file" accept="image/*" multiple class="hidden">
+    </div>
+
+    <div class="box">
+      <b>Primary AI</b>
+      <label><span class="label">Provider</span>
+        <select id="provider">
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="compatible">OpenAI-compatible</option>
+        </select>
+      </label>
+      <label><span class="label">Model</span><input id="model" type="text"></label>
+      <label id="basewrap" class="hidden"><span class="label">Compatible base URL</span><input id="baseurl" type="text" placeholder="https://provider.example/v1"></label>
+      <label><span class="label">API key</span><input id="apikey" type="password" autocomplete="off"></label>
+
+      <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+
+      <b>Secondary AI</b>
+      <label><span class="label">Provider</span>
+        <select id="provider2">
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="compatible">OpenAI-compatible</option>
+        </select>
+      </label>
+      <label><span class="label">Model</span><input id="model2" type="text"></label>
+      <label id="basewrap2" class="hidden"><span class="label">Compatible base URL</span><input id="baseurl2" type="text" placeholder="https://provider.example/v1"></label>
+      <label><span class="label">API key</span><input id="apikey2" type="password" autocomplete="off"></label>
+
+      <label><span class="label">OCR / extraction prompt</span><textarea id="prompt"></textarea></label>
+      <div class="small">Primary is used for normal batch processing. Secondary is used by the secondary retry buttons. Provider/model/prompt settings are remembered locally; API keys are not.</div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <button class="primary" id="run">Process batch</button>
+    <span class="small" style="align-self:center;font-weight:700">Current pile:</span>
+    <select id="current-ai" style="width:auto">
+      <option value="primary" selected>Primary</option>
+      <option value="secondary">Secondary</option>
+    </select>
+    <button id="retry-current-primary">Retry current pile</button>
+    <span class="small" style="align-self:center;font-weight:700">Review:</span>
+    <select id="review-ai" style="width:auto">
+      <option value="primary">Primary</option>
+      <option value="secondary" selected>Secondary</option>
+    </select>
+    <button id="retry-review">Retry Review</button>
+
+    <span class="small" style="align-self:center;font-weight:700">Unclear:</span>
+    <select id="unclear-ai" style="width:auto">
+      <option value="primary">Primary</option>
+      <option value="secondary" selected>Secondary</option>
+    </select>
+    <button id="retry-unclear">Retry Unclear</button>
+
+    <span class="small" style="align-self:center;font-weight:700">Math Unsure:</span>
+    <select id="mathunsure-ai" style="width:auto">
+      <option value="primary">Primary</option>
+      <option value="secondary" selected>Secondary</option>
+    </select>
+    <button id="retry-mathunsure">Retry Math Unsure</button>
+
+    <span class="small" style="align-self:center;font-weight:700">Failed:</span>
+    <select id="failed-ai" style="width:auto">
+      <option value="primary">Primary</option>
+      <option value="secondary" selected>Secondary</option>
+    </select>
+    <button id="retry-failed">Retry Failed</button>
+    <button id="download-all">Download all .md</button>
+    <button id="download-review">Download Review pile</button>
+    <button id="download-unclear">Download Unclear pile</button>
+    <button id="download-failed">Download Failed report</button>
+    <button id="repair-current">Repair LaTeX in current pile</button>
+    <button id="pdf-all">PDF: All completed</button>
+    <button id="pdf-good">PDF: Good</button>
+    <button id="pdf-review">PDF: Review</button>
+    <button id="pdf-unclear">PDF: Unclear</button>
+    <button id="pdf-mathunsure">PDF: Math Unsure</button>
+    <button id="clear">Clear all</button>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="pile-tabs" id="tabs">
+    <button data-filter="all" class="active">All</button>
+    <button data-filter="good">Good</button>
+    <button data-filter="review">Review</button>
+    <button data-filter="unclear">Unclear</button>
+    <button data-filter="mathunsure">Math Unsure</button>
+    <button data-filter="failed">Failed</button>
+    <button data-filter="queued">Queued</button>
+  </div>
+  <div id="results"></div>
+</section>
+</div>
+
+<script>
+const PROVIDERS={
+ openai:{model:'gpt-4.1-mini'},
+ anthropic:{model:'claude-3-7-sonnet-latest'},
+ gemini:{model:'gemini-2.5-flash'},
+ compatible:{model:'gpt-4o-mini'}
+};
+const DEFAULT_PROMPT=`Transcribe all visible text from this image.
+
+Rules:
+- Preserve the original wording as closely as possible.
+- Keep paragraphs, line breaks, headings, lists, labels, and equations when visible.
+- Preserve mathematical notation carefully. Prefer LaTeX for math: use $...$ or \\(...\\) for inline math and $$...$$ or \\[...\\] for displayed equations.
+- Preserve fractions, radicals, exponents, subscripts, Greek letters, integrals, sums, limits, matrices, and aligned equations whenever visible.
+- Do not summarize.
+- If ordinary text is unreadable, write [unclear] exactly where it occurs instead of guessing.
+- If there is no readable text, return exactly: [No readable text found]
+- If you are unsure about a mathematical operator, sign, exponent, subscript, variable, bound, radical, fraction, or equation structure, do NOT silently guess.
+- Put the uncertainty exactly where it occurs using:
+  [MATH_UNSURE: seen="..." guess="..." note="..."] (I think it says: ...)
+- In seen="", describe/copy the ambiguous marks as literally as possible.
+- In guess="", give the best plausible LaTeX interpretation.
+- In note="", briefly say what is uncertain.
+- In "(I think it says: ...)", repeat the best guess in a readable form using LaTeX delimiters when appropriate.
+- Example:
+  [MATH_UNSURE: seen="x ? 4" guess="$x+4$" note="operator could be + or -"] (I think it says: $x+4$)`
+
+const state={items:[],filter:'all',running:false};
+
+const $=id=>document.getElementById(id);
+const els={provider:$('provider'),model:$('model'),basewrap:$('basewrap'),baseurl:$('baseurl'),apikey:$('apikey'),provider2:$('provider2'),model2:$('model2'),basewrap2:$('basewrap2'),baseurl2:$('baseurl2'),apikey2:$('apikey2'),prompt:$('prompt'),files:$('files'),drop:$('drop'),results:$('results')};
+
+function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
+function slug(s){return (s||'page').toLowerCase().replace(/\.[^.]+$/,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60)||'page'}
+function saveSettings(){
+ localStorage.setItem('sorted_ocr_provider',els.provider.value);
+ localStorage.setItem('sorted_ocr_model',els.model.value.trim());
+ localStorage.setItem('sorted_ocr_baseurl',els.baseurl.value.trim());
+ localStorage.setItem('sorted_ocr_provider2',els.provider2.value);
+ localStorage.setItem('sorted_ocr_model2',els.model2.value.trim());
+ localStorage.setItem('sorted_ocr_baseurl2',els.baseurl2.value.trim());
+ localStorage.setItem('sorted_ocr_prompt_v3',els.prompt.value);
+ const mapIds=['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai'];
+ for(const id of mapIds){const el=$(id); if(el) localStorage.setItem('sorted_ocr_'+id,el.value);}
+}
+function loadSettings(){
+ const p=localStorage.getItem('sorted_ocr_provider')||'openai';
+ const p2=localStorage.getItem('sorted_ocr_provider2')||'openai';
+ els.provider.value=p;
+ els.model.value=localStorage.getItem('sorted_ocr_model')||PROVIDERS[p].model;
+ els.baseurl.value=localStorage.getItem('sorted_ocr_baseurl')||'';
+ els.provider2.value=p2;
+ els.model2.value=localStorage.getItem('sorted_ocr_model2')||PROVIDERS[p2].model;
+ els.baseurl2.value=localStorage.getItem('sorted_ocr_baseurl2')||'';
+ els.prompt.value=localStorage.getItem('sorted_ocr_prompt_v3')||DEFAULT_PROMPT;
+ for(const id of ['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai']){
+   const el=$(id); if(el) el.value=localStorage.getItem('sorted_ocr_'+id)||(id==='current-ai'?'primary':'secondary');
+ }
+ syncProvider(1,false);
+ syncProvider(2,false);
+}
+function syncProvider(which=1,reset=true){
+ if(which===1){
+   els.basewrap.classList.toggle('hidden',els.provider.value!=='compatible');
+   if(reset) els.model.value=PROVIDERS[els.provider.value].model;
+ }else{
+   els.basewrap2.classList.toggle('hidden',els.provider2.value!=='compatible');
+   if(reset) els.model2.value=PROVIDERS[els.provider2.value].model;
+ }
+ saveSettings();
+}
+els.provider.addEventListener('change',()=>syncProvider(1,true));
+els.provider2.addEventListener('change',()=>syncProvider(2,true));
+[els.model,els.baseurl,els.model2,els.baseurl2,els.prompt].forEach(x=>x.addEventListener('change',saveSettings));
+['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',saveSettings)});
+
+function addFiles(list){
+ [...list].filter(f=>f.type.startsWith('image/')).forEach((f,i)=>state.items.push({
+   id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+i+'-'+Math.random(),
+   file:f,name:f.name,size:f.size,url:URL.createObjectURL(f),
+   status:'queued',classification:'queued',reason:'Waiting to be processed.',text:'',rawText:'',error:'',repairs:[],history:[]
+ }));
+ render();
+}
+els.drop.onclick=()=>els.files.click();
+els.files.onchange=e=>addFiles(e.target.files);
+['dragenter','dragover'].forEach(ev=>els.drop.addEventListener(ev,e=>{e.preventDefault();els.drop.style.borderColor='#111827'}));
+['dragleave','drop'].forEach(ev=>els.drop.addEventListener(ev,e=>{e.preventDefault();els.drop.style.borderColor=''}));
+els.drop.addEventListener('drop',e=>addFiles(e.dataTransfer.files));
+
+
+function mathSegments(input){
+ const t=String(input??'');
+ const segs=[];
+ const patterns=[
+   /\$\$[\s\S]*?\$\$/g,
+   /\\\[[\s\S]*?\\\]/g,
+   /\\\([\s\S]*?\\\)/g,
+   /(?<!\$)\$(?!\$)[\s\S]*?(?<!\$)\$(?!\$)/g
+ ];
+ for(const re of patterns){
+   let m;
+   while((m=re.exec(t))) segs.push({start:m.index,end:m.index+m[0].length,text:m[0]});
+ }
+ return segs.sort((x,y)=>x.start-y.start);
+}
+
+function repairMathSpan(span,repairs){
+ let s=span;
+ const replacements=[
+   [/[−–]/g,'-','normalized Unicode minus/dash in math'],
+   [/×/g,'\\times ','converted × to \\times in math'],
+   [/∞/g,'\\infty ','converted ∞ to \\infty in math'],
+   [/±/g,'\\pm ','converted ± to \\pm in math'],
+   [/≤/g,'\\le ','converted ≤ to \\le in math'],
+   [/≥/g,'\\ge ','converted ≥ to \\ge in math'],
+   [/≠/g,'\\ne ','converted ≠ to \\ne in math'],
+   [/→/g,'\\to ','converted → to \\to in math'],
+   [/⇒/g,'\\Rightarrow ','converted ⇒ to \\Rightarrow in math'],
+   [/π/g,'\\pi ','converted π to \\pi in math'],
+   [/°/g,'^{\\circ}','converted degree symbol in math'],
+   [/²/g,'^{2}','converted superscript ² in math'],
+   [/³/g,'^{3}','converted superscript ³ in math']
+ ];
+ for(const [re,rep,label] of replacements){
+   const before=s; s=s.replace(re,rep); if(s!==before) repairs.push(label);
+ }
+
+ // Deliberately DO NOT auto-convert √. Without knowing the radicand,
+ // turning √x into \sqrt{}x changes the mathematical structure.
+
+ // Only restore missing backslashes when command-like syntax follows.
+ // Avoid converting ordinary prose words such as "sum" or "log".
+ const cmds=['dfrac','frac','cdot','sqrt','infty','int','sum','lim','sin','cos','tan','ln','log','theta','alpha','beta','gamma','Delta','partial'];
+ for(const cmd of cmds){
+   const re=new RegExp('(^|[^A-Za-z\\\\\\\\])'+cmd+'(?=\\\\s*(?:\\\\{|_|\\\\^|\\\\())','g');
+   const before=s;
+   s=s.replace(re,(m,p1)=>p1+'\\\\'+cmd);
+   if(s!==before) repairs.push('restored missing \\\\ before '+cmd+' in math');
+ }
+ return s;
+}
+
+function repairLatexForMathJax(input){
+ let t=String(input??'');
+ const repairs=[];
+
+ // Normalize duplicated MathJax delimiters globally.
+ const beforeDelim=t;
+ t=t.replace(/\\\\\(/g,'\\(').replace(/\\\\\)/g,'\\)')
+    .replace(/\\\\\[/g,'\\[').replace(/\\\\\]/g,'\\]');
+ if(t!==beforeDelim) repairs.push('normalized doubled MathJax delimiters');
+
+ // Strip non-printing control characters.
+ const beforeCtrl=t;
+ t=t.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,'');
+ if(t!==beforeCtrl) repairs.push('removed control-character escape artifacts');
+
+ // Apply symbol/command repairs only inside recognized math delimiters.
+ const segs=mathSegments(t);
+ if(segs.length){
+   let out='',pos=0;
+   for(const seg of segs){
+     // Skip overlapping matches from the multiple delimiter regexes.
+     if(seg.start<pos) continue;
+     out+=t.slice(pos,seg.start);
+     out+=repairMathSpan(seg.text,repairs);
+     pos=seg.end;
+   }
+   out+=t.slice(pos);
+   t=out;
+ }
+
+ return {text:t,repairs:[...new Set(repairs)]};
+}
+
+function latexStructuralWarnings(input){
+ const t=String(input??'');
+ const warnings=[];
+
+ const count=(re)=>(t.match(re)||[]).length;
+ const op=count(/\\\(/g), cp=count(/\\\)/g);
+ const ob=count(/\\\[/g), cb=count(/\\\]/g);
+ const dd=count(/\$\$/g);
+ if(op!==cp) warnings.push(`unbalanced \\\\( \\\\) (${op} vs ${cp})`);
+ if(ob!==cb) warnings.push(`unbalanced \\\\[ \\\\] (${ob} vs ${cb})`);
+ if(dd%2!==0) warnings.push('unbalanced $$ delimiters');
+
+ // Only brace-check recognized math spans, not ordinary prose.
+ for(const seg of mathSegments(t)){
+   let depth=0,bad=false;
+   for(let i=0;i<seg.text.length;i++){
+     if(seg.text[i]==='\\'){i++;continue}
+     if(seg.text[i]==='{') depth++;
+     else if(seg.text[i]==='}'){depth--;if(depth<0){bad=true;break}}
+   }
+   if(bad||depth!==0){warnings.push('unbalanced { } braces inside math');break}
+ }
+
+ // Flag a radical character rather than guessing its scope.
+ if(mathSegments(t).some(seg=>seg.text.includes('√')))
+   warnings.push('Unicode radical √ needs scope review; not auto-rewritten');
+
+ return [...new Set(warnings)];
+}
+
+function classifyText(text){
+ const t=(text||'').trim();
+ const lower=t.toLowerCase();
+
+ if(!t) return {classification:'review',reason:'The provider returned empty or whitespace-only text.'};
+
+ if(/\[no readable text found\]/i.test(t))
+   return {classification:'unclear',reason:'The model explicitly reported no readable text.'};
+
+ const mathUnsureMatches=t.match(/\[MATH_UNSURE:[^\]]*\]/gi)||[];
+ if(mathUnsureMatches.length){
+   return {classification:'mathunsure',reason:`Contains ${mathUnsureMatches.length} explicit math-uncertainty marker${mathUnsureMatches.length===1?'':'s'} with a possible guess for review.`};
+ }
+
+ const unclearMatches=t.match(/\[unclear[^\]]*\]/gi)||[];
+ if(unclearMatches.length){
+   const density=unclearMatches.length/Math.max(1,t.split(/\s+/).length);
+   return {classification:'unclear',reason:`Contains ${unclearMatches.length} explicit [unclear] marker${unclearMatches.length===1?'':'s'}${density>0.04?' (high density)':''}.`};
+ }
+
+ const latexWarnings=latexStructuralWarnings(t);
+ if(latexWarnings.length){
+   return {classification:'mathunsure',reason:'LaTeX structure still needs review: '+latexWarnings.join('; ')+'.'};
+ }
+
+ // Suspicious success heuristics: technically completed, but worth human review.
+ const words=t.split(/\s+/).filter(Boolean);
+ const replacement=(t.match(/�/g)||[]).length;
+ const questionRuns=(t.match(/\?{3,}/g)||[]).length;
+ const weird=(t.match(/[|]{4,}|[_]{6,}|[.]{8,}/g)||[]).length;
+
+ if(words.length<6)
+   return {classification:'review',reason:'Very little text was returned; verify that the page was actually captured.'};
+ if(replacement>0)
+   return {classification:'review',reason:'Contains replacement characters (�), which can indicate damaged or uncertain text.'};
+ if(questionRuns>0||weird>0)
+   return {classification:'review',reason:'Contains suspicious placeholder/garbled character patterns.'};
+
+ return {classification:'good',reason:'No automatic warning signs detected.'};
+}
+
+function stats(){
+ const counts={total:state.items.length,good:0,review:0,unclear:0,mathunsure:0,failed:0,queued:0,running:0};
+ state.items.forEach(i=>{
+   if(i.status==='running')counts.running++;
+   else if(i.status==='queued')counts.queued++;
+   else if(i.classification in counts)counts[i.classification]++;
+ });
+ return counts;
+}
+function renderStats(){
+ const s=stats(); Object.keys(s).forEach(k=>{const e=$('s-'+k);if(e)e.textContent=s[k]});
+}
+function visibleItems(){
+ if(state.filter==='all') return state.items;
+ return state.items.filter(i=>i.classification===state.filter || (state.filter==='queued'&&i.status==='queued'));
+}
+function badgeClass(i){return i.status==='running'?'running':i.status==='queued'?'queued':i.classification}
+function badgeLabel(i){return i.status==='running'?'Running':i.status==='queued'?'Queued':({good:'Good',review:'Review',unclear:'Unclear',mathunsure:'Math Unsure',failed:'Failed'})[i.classification]||i.classification}
+function render(){
+ renderStats();
+ const list=visibleItems();
+ if(!list.length){els.results.innerHTML='<div class="empty">No items in this pile.</div>';return}
+ els.results.innerHTML=list.map((i,idx)=>`
+ <section class="panel card">
+  <aside class="side">
+   <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}</div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
+   <img class="preview" src="${i.url}" alt="${esc(i.name)}">
+   <div class="toolbar">
+    <button onclick="runSingleById('${i.id}')">Run again with Primary</button>
+    ${i.history&&i.history.length?`<button onclick="restorePrevious('${i.id}')">Restore previous</button>`:''}
+    <button onclick="removeById('${i.id}')">Remove</button>
+   </div>
+   <div class="manual">
+    <button onclick="manualClass('${i.id}','good')">Good</button>
+    <button onclick="manualClass('${i.id}','review')">Review</button>
+    <button onclick="manualClass('${i.id}','unclear')">Unclear</button>
+    <button onclick="manualClass('${i.id}','mathunsure')">Math Unsure</button>
+    <button onclick="manualClass('${i.id}','failed')">Failed</button>
+   </div>
+  </aside>
+  <div class="main">
+   <b>Extracted text</b>
+   ${i.reason?`<div class="reason"><b>Sorting reason:</b> ${esc(i.reason)}</div>`:''}
+   ${i.repairs&&i.repairs.length?`<div class="reason"><b>LaTeX repair log:</b> ${esc(i.repairs.join(' • '))}</div>`:''}
+   ${i.error?`<div class="error">${esc(i.error)}</div>`:''}
+   <textarea class="output" oninput="editText('${i.id}',this.value)" placeholder="Extracted text will appear here.">${esc(i.text)}</textarea>
+  </div>
+ </section>`).join('');
+}
+window.editText=(id,v)=>{
+ const i=state.items.find(x=>x.id===id); if(!i)return; i.text=v;
+ if(i.status==='done'){
+   const c=classifyText(v);
+   i.classification=c.classification;
+   i.reason='Reclassified after manual text edit: '+c.reason;
+   renderStats();
+ }
+};
+window.manualClass=(id,c)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.classification=c;i.status=c==='failed'?'error':'done';i.reason='Manually assigned to '+c+'.';render()};
+window.restorePrevious=id=>{
+ const i=state.items.find(x=>x.id===id); if(!i||!i.history||!i.history.length)return;
+ const prev=i.history.pop();
+ i.text=prev.text;i.repairs=prev.repairs||[];i.classification=prev.classification||'review';
+ i.reason=prev.reason||'Restored previous transcription.';
+ i.lastProvider=prev.lastProvider;i.lastModel=prev.lastModel;i.lastPass=prev.lastPass;
+ i.status='done';i.error='';render();
+};
+window.removeById=id=>{const i=state.items.find(x=>x.id===id);if(i)URL.revokeObjectURL(i.url);state.items=state.items.filter(x=>x.id!==id);render()};
+
+function dataURL(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result||''));r.onerror=()=>rej(new Error('Failed to read '+file.name));r.readAsDataURL(file)})}
+function b64(d){return d.split(',')[1]||''}
+function extractOpenAI(j){
+ if(typeof j?.output_text==='string'&&j.output_text.trim())return j.output_text.trim();
+ const out=[]; for(const item of j?.output||[])for(const c of item?.content||[])if(typeof c?.text==='string')out.push(c.text);
+ return out.join('\n\n').trim()
+}
+function extractAnthropic(j){return (j?.content||[]).filter(x=>x?.type==='text').map(x=>x.text||'').filter(Boolean).join('\n\n').trim()}
+function extractGemini(j){return (j?.candidates?.[0]?.content?.parts||[]).map(x=>x?.text||'').filter(Boolean).join('\n\n').trim()}
+function extractCompatible(j){const c=j?.choices?.[0]?.message?.content;if(typeof c==='string')return c.trim();if(Array.isArray(c))return c.map(x=>x?.text||'').filter(Boolean).join('\n\n').trim();return ''}
+
+async function transcribe(item,s){
+ const d=await dataURL(item.file), base=b64(d), mime=item.file.type||'image/jpeg';
+ let response,j,text='';
+ if(s.provider==='openai'){
+   response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+s.apiKey},body:JSON.stringify({model:s.model,input:[{role:'user',content:[{type:'input_text',text:s.prompt},{type:'input_image',image_url:d}]}]})});
+   j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'OpenAI request failed.'); text=extractOpenAI(j);
+ }else if(s.provider==='anthropic'){
+   response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':s.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:s.model,max_tokens:4096,temperature:0,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:mime,data:base}},{type:'text',text:s.prompt}]}]})});
+   j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'Anthropic request failed.'); text=extractAnthropic(j);
+ }else if(s.provider==='gemini'){
+   const ep=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent?key=${encodeURIComponent(s.apiKey)}`;
+   response=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:s.prompt},{inlineData:{mimeType:mime,data:base}}]}],generationConfig:{temperature:0}})});
+   j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'Gemini request failed.'); text=extractGemini(j);
+ }else{
+   const u=s.baseUrl.replace(/\/$/,''); if(!u)throw new Error('Enter a compatible base URL.');
+   response=await fetch(u+'/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+s.apiKey},body:JSON.stringify({model:s.model,messages:[{role:'user',content:[{type:'text',text:s.prompt},{type:'image_url',image_url:{url:d}}]}],temperature:0})});
+   j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'Compatible-provider request failed.'); text=extractCompatible(j);
+ }
+ if(!text)throw new Error('No text returned by provider.');
+ return text;
+}
+function snapPrimary(){return{provider:els.provider.value,model:els.model.value.trim(),apiKey:els.apikey.value.trim(),baseUrl:els.baseurl.value.trim(),prompt:els.prompt.value,pass:'primary'}}
+function snapSecondary(){return{provider:els.provider2.value,model:els.model2.value.trim(),apiKey:els.apikey2.value.trim(),baseUrl:els.baseurl2.value.trim(),prompt:els.prompt.value,pass:'secondary'}}
+
+function snapForChoice(choice){
+ return choice==='secondary' ? snapSecondary() : snapPrimary();
+}
+
+function validateSnap(s){if(!s.apiKey){alert(`Enter the ${s.pass||'selected'} AI API key first.`);return false}if(!s.model){alert('Enter a model name.');return false}if(s.provider==='compatible'&&!s.baseUrl){alert('Enter a compatible base URL.');return false}return true}
+
+async function runOne(i,s){
+ i.status='running';i.classification='queued';i.reason='Processing…';i.error='';render();
+ try{
+   const rawText=await transcribe(i,s);
+   const repaired=repairLatexForMathJax(rawText);
+   const c=classifyText(repaired.text);
+   if(i.text){
+     i.history=i.history||[];
+     i.history.push({text:i.text,repairs:[...(i.repairs||[])],classification:i.classification,reason:i.reason,lastProvider:i.lastProvider,lastModel:i.lastModel,lastPass:i.lastPass});
+   }
+   i.rawText=rawText;
+   i.text=repaired.text;i.repairs=repaired.repairs;i.status='done';i.classification=c.classification;i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
+   i.reason=(repaired.repairs.length?`Auto-repaired ${repaired.repairs.length} common LaTeX artifact${repaired.repairs.length===1?'':'s'}. `:'')+c.reason;
+   i.error='';
+ }catch(e){
+   i.status='error';i.classification='failed';i.error=e instanceof Error?e.message:String(e);i.reason='The API/browser request failed, so no usable transcription was produced.';
+ }
+ render();
+}
+window.runSingleById=async id=>{if(state.running)return;const s=snapPrimary();if(!validateSnap(s))return;const i=state.items.find(x=>x.id===id);if(i)await runOne(i,s)};
+
+async function runList(list,s){
+ if(state.running)return;
+ if(!list.length){alert('There are no items in this pile to process.');return;}
+ if(!s) s=snapPrimary();
+ if(!validateSnap(s))return;
+ state.running=true;
+ ['run','retry-current-primary','retry-review','retry-unclear','retry-mathunsure','retry-failed'].forEach(id=>{const b=$(id);if(b)b.disabled=true});
+ for(const i of list)await runOne(i,s);
+ state.running=false;
+ ['run','retry-current-primary','retry-review','retry-unclear','retry-mathunsure','retry-failed'].forEach(id=>{const b=$(id);if(b)b.disabled=false});
+ render();
+}
+$('run').onclick=()=>runList(state.items.filter(i=>i.status==='queued'),snapPrimary());
+$('retry-current-primary').onclick=()=>runList(visibleItems().filter(i=>i.status!=='running'),snapForChoice($('current-ai').value));
+$('retry-review').onclick=()=>runList(state.items.filter(i=>i.classification==='review'),snapForChoice($('review-ai').value));
+$('retry-unclear').onclick=()=>runList(state.items.filter(i=>i.classification==='unclear'),snapForChoice($('unclear-ai').value));
+$('retry-mathunsure').onclick=()=>runList(state.items.filter(i=>i.classification==='mathunsure'),snapForChoice($('mathunsure-ai').value));
+$('retry-failed').onclick=()=>runList(state.items.filter(i=>i.classification==='failed'),snapForChoice($('failed-ai').value));
+
+$('tabs').onclick=e=>{
+ const b=e.target.closest('button[data-filter]');if(!b)return;
+ state.filter=b.dataset.filter;document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===b));render();
+};
+
+function download(name,content){
+ const blob=new Blob([content],{type:'text/plain;charset=utf-8'}),u=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(u);
+}
+function mdFor(list){
+ return list.map((i,n)=>`# ${i.name}\n\nStatus: ${i.classification}\nReason: ${i.reason||''}\n\n${i.text||''}`).join('\n\n---\n\n')
+}
+$('download-all').onclick=()=>download('photo-to-text-all.md',mdFor(state.items.filter(i=>i.text)));
+$('download-review').onclick=()=>download('photo-to-text-review.md',mdFor(state.items.filter(i=>i.classification==='review')));
+$('download-unclear').onclick=()=>download('photo-to-text-unclear.md',mdFor(state.items.filter(i=>i.classification==='unclear')));
+$('download-failed').onclick=()=>download('photo-to-text-failed.txt',state.items.filter(i=>i.classification==='failed').map(i=>`${i.name}\n${i.error||i.reason}`).join('\n\n---\n\n'));
+
+function htmlEscape(s){
+ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')
+}
+function textToPrintableHTML(s){
+ // Preserve source text and line structure while letting MathJax see TeX delimiters.
+ const repaired=repairLatexForMathJax(s).text; return htmlEscape(repaired).replace(/\n/g,'<br>');
+}
+function exportPdfPile(list,title){
+ const usable=list.filter(i=>i.text && i.classification!=='failed');
+ if(!usable.length){alert('There is no transcribed text in this pile yet.');return}
+
+ const sections=usable.map((i,n)=>`
+ <section class="page">
+   <div class="meta">
+     <div class="filename">${htmlEscape(i.name)}</div>
+     <div class="status">Status: ${htmlEscape(i.classification)}${i.reason ? ' — '+htmlEscape(i.reason) : ''}</div>
+   </div>
+   <div class="transcription">${textToPrintableHTML(i.text)}</div>
+ </section>`).join('');
+
+ const w=window.open('','_blank');
+ if(!w){alert('The browser blocked the PDF window. Allow pop-ups for this file and try again.');return}
+ try{w.opener=null}catch(e){}
+ w.document.open();
+ w.document.write(`<!doctype html>
+ <html><head><meta charset="utf-8">
+ <title>${htmlEscape(title)}</title>
+ <script>
+ window.MathJax={
+   tex:{inlineMath:[['\\\\(','\\\\)'],['$','$']],displayMath:[['\\\\[','\\\\]'],['$$','$$']],processEscapes:true},
+   options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
+ };
+ <\/script>
+ <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"><\/script>
+ <style>
+  @page{size:auto;margin:0.6in}
+  body{font-family:Georgia,'Times New Roman',serif;color:#111;line-height:1.5;margin:0}
+  h1{font-family:Arial,sans-serif;font-size:20px;margin:0 0 18px}
+  .page{break-after:page;page-break-after:always}
+  .page:last-child{break-after:auto;page-break-after:auto}
+  .meta{font-family:Arial,sans-serif;border-bottom:1px solid #bbb;padding-bottom:8px;margin-bottom:16px}
+  .filename{font-size:15px;font-weight:700}
+  .status{font-size:10px;color:#666;margin-top:3px}
+  .transcription{font-size:12.5pt;white-space:normal;overflow-wrap:anywhere}
+  mjx-container[display="true"]{margin:1em 0!important;overflow-x:auto;overflow-y:hidden}
+  @media print{
+    .no-print{display:none!important}
+    a{color:inherit;text-decoration:none}
+  }
+ </style>
+ </head><body>
+ <div class="no-print" style="font-family:Arial,sans-serif;padding:10px 12px;background:#f3f4f6;border-bottom:1px solid #ddd">
+   MathJax will finish rendering, then the print dialog opens. Choose <b>Save as PDF</b>.
+ </div>
+ <h1>${htmlEscape(title)}</h1>
+ ${sections}
+ <script>
+ (async function(){
+   try{
+     if(window.MathJax && MathJax.startup && MathJax.startup.promise){
+       await MathJax.startup.promise;
+     }
+     if(window.MathJax && MathJax.typesetPromise){
+       await MathJax.typesetPromise();
+     }
+   }catch(e){}
+   setTimeout(()=>window.print(),250);
+ })();
+ <\/script>
+ </body></html>`);
+ w.document.close();
+}
+
+
+$('repair-current').onclick=()=>{
+ const list=visibleItems();
+ let changed=0;
+ for(const i of list){
+   if(!i.text) continue;
+   const r=repairLatexForMathJax(i.text);
+   if(r.text!==i.text){
+     i.text=r.text;
+     i.repairs=[...(i.repairs||[]),...r.repairs].filter((v,k,a)=>a.indexOf(v)===k);
+     changed++;
+   }
+   const c=classifyText(i.text);
+   if(i.status==='done'){
+     i.classification=c.classification;
+     i.reason=(i.repairs&&i.repairs.length?`LaTeX repair pass applied. `:'')+c.reason;
+   }
+ }
+ render();
+ alert(changed?`Repaired ${changed} item${changed===1?'':'s'} in this pile.`:'No additional safe LaTeX repairs were found in this pile.');
+};
+
+$('pdf-all').onclick=()=>exportPdfPile(state.items.filter(i=>i.status==='done'),'Photo-to-Text — All completed');
+$('pdf-good').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='good'),'Photo-to-Text — Good pile');
+$('pdf-review').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='review'),'Photo-to-Text — Review pile');
+$('pdf-unclear').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='unclear'),'Photo-to-Text — Unclear pile');
+$('pdf-mathunsure').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='mathunsure'),'Photo-to-Text — Math Unsure pile');
+
+$('clear').onclick=()=>{if(!confirm('Clear all loaded images and results?'))return;state.items.forEach(i=>URL.revokeObjectURL(i.url));state.items=[];render()};
+
+loadSettings();render();
+</script>
+</body>
+</html>
