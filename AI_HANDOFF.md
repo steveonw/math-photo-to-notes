@@ -1184,6 +1184,15 @@ Diagnostics should remain action-oriented.
 62. Clear all deleting long-term Good-page reliability evidence.
 63. opening a project replacing rather than merging the browser-global reliability ledger.
 64. external-review workflow being ZIP-only when a chat client needs loose source images to force visual inspection.
+65. High Assurance redundantly verifying pages that were already Review / Math Unsure / Unclear instead of limiting verification to otherwise-Good pages.
+66. the High Assurance verifier receiving the Primary transcription or hidden reasoning and therefore losing independence.
+67. High Assurance disagreement overwriting the Primary transcription or automatically choosing the Secondary answer.
+68. Auto-fix continuing automatically after a High Assurance disagreement instead of stopping for human Review.
+69. High Assurance verifier calls being omitted from usage/cost reporting.
+70. reliability evidence labeling a page High Assurance merely because the batch toggle was on even though that page was not actually verified.
+71. formatting-only math delimiter changes causing false High Assurance disagreement.
+72. a verifier result queued against an older Primary text changing state after the Primary text has since changed.
+73. a High Assurance process batch starting without usable Secondary configuration/credentials.
 
 ---
 
@@ -1211,7 +1220,7 @@ The default user story is:
 ### Release A — Simplified Batch UX — implemented 2026-09-30
 - Quick Transcribe is the default batch path
 - Auto-fix flagged pages is the user-facing name for bounded automatic routing
-- High Assurance Math is visible but disabled until Release D
+- High Assurance Math is an optional verification workflow; it remains off by default
 - power-user routing/retry controls are collapsed under Advanced
 - completed queues produce a persisted run-scoped dashboard
 - dashboard explains the limited meaning of Good
@@ -1275,22 +1284,100 @@ The default user story is:
 - external review export supports ZIP or Loose images + text
 - Loose mode is intended for direct multi-file chat upload testing; ZIP remains the reproducible archive format
 
-### Release D — High Assurance Math — next active release
-- deterministic math-heavy triggers
-- independent verifier/second reading
-- no hidden reasoning transfer
-- disagreement → Review
-- no automatic winner
-- explicit added-cost visibility
-- evaluate usefulness using spot-check evidence
+### Release D — High Assurance Math — implemented 2026-09-30
+- off by default
+- policies: Math-heavy only / Any detected math / All Good pages
+- verification is limited to pages that would otherwise be Good
+- deterministic math trigger score/signals are saved as provenance
+- verifier is a fresh Secondary-slot call through the durable queue
+- verifier sees the original image and project rules, not the Primary transcription or hidden reasoning
+- Secondary configuration is required before a High Assurance batch starts
+- verifier uses existing pause/resume/cancel/timeout/transient-retry infrastructure
+- Primary final text is never replaced automatically
+- math payloads and prose skeletons are compared separately, with whole-text similarity as a secondary signal
+- formatting-only delimiter differences are tolerated
+- semantic math disagreement → Review
+- verifier warnings/truncation/non-Good results → Review
+- disagreement never selects a winner
+- High Assurance disagreement does not continue into Auto-fix
+- stale Primary-text hash guard prevents an older verifier result from changing newer page state
+- verifier failures preserve Primary and require Review; cancellation preserves Primary
+- page card exposes independent verifier evidence
+- batch summary reports verified / disagreement / failed verification counts
+- verifier calls are explicit in usage/cost reporting
+- cost preview shows maximum extra-call count and historical cost estimate when rate/history data exist
+- audit/archive/Doctor preserve High Assurance evidence
+- spot-check records distinguish requested from actually verified
+- reliability groups separate standard Good pages from High Assurance verified pages
+- Chromium CI covers agreement and sign-level disagreement end to end
 
-### Release E — Infrastructure hardening
+### Release E — Infrastructure hardening — next active release
 - durable targeted-region queue jobs
 - explicit project-schema migrations
 - larger checked-in browser regression corpus
 - self-host MathJax
 - memory-efficient/compressed archive support
 - optional image-quality tools if reliability data shows they are worthwhile
+
+# High Assurance Math
+
+Release D adds independent verification for selected pages that would otherwise be Good.
+
+## Eligibility
+
+High Assurance runs only for normal **Process Batch** Primary results that finish as Good.
+
+Policies:
+
+- **Math-heavy only** — default; deterministic math-heavy score threshold
+- **Any detected math**
+- **All Good pages**
+
+Flagged pages are not redundantly verified; they retain the existing Review / Auto-fix workflow.
+
+## Independence boundary
+
+The verifier uses the Secondary configuration and original image.
+
+Its prompt explicitly asks for an independent transcription and does not include the Primary transcription.
+
+Do not change this into a “critique this Primary answer” prompt without reconsidering the independence assumption.
+
+## Comparison
+
+The app compares:
+
+- normalized math payloads
+- prose skeletons with math replaced by placeholders
+- normalized whole-text similarity
+
+This intentionally tolerates delimiter/whitespace-only differences while treating changed mathematical content conservatively.
+
+If comparison or verifier quality checks raise concern:
+
+- keep the Primary final text
+- preserve the Secondary verifier reading
+- move the page to Review
+- choose no automatic winner
+- do not feed that assurance disagreement into automatic routing
+
+## Stale-result protection
+
+A High Assurance queue job stores a hash of the Primary text it was created to verify.
+
+If final text changes before comparison, the verifier result becomes stale evidence only and cannot mutate page state.
+
+## Reliability meaning
+
+A batch can request High Assurance without every Good page being eligible.
+
+Therefore:
+
+- `lastHighAssurance` means High Assurance was requested for the batch
+- `highAssuranceStatus === 'verified'` means this specific page actually received and passed independent verification
+- spot-check/reliability reporting must use actual verified status, not merely the batch toggle
+
+---
 
 ## Important interpretation of Good
 
