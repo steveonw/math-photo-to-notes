@@ -1021,6 +1021,74 @@ The audit manifest does not contain API keys.
 
 ---
 
+# External AI Round Trip
+
+Release C adds a complete external-review loop while keeping this app as the source of truth.
+
+## Export
+
+**Review with External AI** creates chunked review ZIPs.
+
+Default chunk size: 10 pages.
+
+Selectable chunk sizes:
+
+- 5
+- 10
+- 20
+
+Each package has a stable package ID and expected page-ID list that are persisted in the project.
+
+Each ZIP contains source images where available, page records, current/raw transcription, deterministic warnings, Math Unsure details, metadata, a generated review prompt, a manifest, and an exact return template.
+
+The prompt tells outside AI systems to propose corrected text only. They must not approve pages or assign application states.
+
+## Import
+
+The importer accepts raw JSON as well as common chat output such as Markdown JSON fences and surrounding prose.
+
+It reports:
+
+- matched pages
+- unknown page IDs
+- duplicates
+- malformed entries
+- expected pages missing from the response
+
+External classification or approval fields are ignored.
+
+Importing creates pending proposals only.
+
+It does **not** change final text or page state.
+
+## Human decision
+
+Each proposal displays:
+
+- source image
+- current final text
+- proposed external text
+- visible diff
+- external note
+
+Proposed text starts read-only.
+
+The human may:
+
+- Accept
+- Reject
+- Edit proposal
+
+Accepted changed text preserves the previous final revision, records external provenance, re-runs safe repair/classification, and revalidates targeted-region dependencies.
+
+A material accepted change to an Approved page becomes Needs Reapproval.
+
+Reject preserves the existing final text and records the rejection.
+
+Pending import sessions persist through Save/Open and can be resumed.
+
+---
+
 # Doctor / Diagnostics
 
 The application includes a Doctor report.
@@ -1102,6 +1170,15 @@ Diagnostics should remain action-oriented.
 48. an OK spot-check being treated as approval.
 49. spot-check evidence losing model/prompt/processing provenance across Save/Open.
 50. reliability reporting turning small human samples into an unsupported accuracy percentage.
+51. external-AI import changing final text before explicit human acceptance.
+52. outside-AI classification/approval fields controlling application state.
+53. unknown, duplicate, malformed, or missing external-return entries being silently ignored without a report.
+54. accepting an external correction destroying the previous final transcription.
+55. accepted external changes on Approved pages remaining Approved.
+56. rejecting an external proposal changing page text.
+57. external-review package IDs/expected page IDs being lost across project Save/Open.
+58. pending imported proposals disappearing when the review panel is closed.
+59. accepting an unchanged external proposal unnecessarily forcing Needs Reapproval.
 
 ---
 
@@ -1158,23 +1235,30 @@ The default user story is:
 - browser CI covers ledger persistence and Error-found behavior
 - no formal accuracy percentage
 
-### Release C — External AI round trip — next active release
-Export and import ship together.
-
-- chat-friendly problem-page chunks
-- stable page IDs
-- generated external-review prompt
+### Release C — External AI round trip — implemented 2026-09-30
+- Review with External AI from batch summary or Project / Export
+- flagged/problem-page selection; transport-only Interrupted pages excluded by default
+- 5 / 10 / 20-page chunk ZIPs, default 10
+- stable persisted package IDs + expected page IDs
+- source image, current/raw transcription, warnings, metadata, prompt, manifest, and return template
+- generated prompt prohibits external approval/classification and invented IDs
 - external AI returns proposed text only
-- tolerant JSON/code-fence parser
-- unknown/missing/malformed page reporting
-- mandatory diff before any change
+- tolerant raw/fenced/prose-wrapped JSON parser
+- matched / unknown / duplicate / malformed / expected-missing report
+- imported proposals cannot change text or state before human decision
+- source/current/proposed three-way review with visible diff
 - Accept / Reject / Edit proposal
-- revision history + provenance
-- deterministic revalidation
-- Approved → Needs Reapproval after accepted change
+- pending sessions persist and can be resumed
+- accepted changed text preserves prior revision and external provenance
+- deterministic repair/classification re-runs after acceptance
+- targeted dependencies are re-anchored/revalidated
+- Approved changed text → Needs Reapproval
+- no-op accepted proposal does not invalidate approval
+- rejected proposals preserve text and record rejection provenance
 - external AI never controls application classification or approval
+- browser CI covers package contract, tolerant import, diff, accept, reject, and approval lineage
 
-### Release D — High Assurance Math
+### Release D — High Assurance Math — next active release
 - deterministic math-heavy triggers
 - independent verifier/second reading
 - no hidden reasoning transfer
