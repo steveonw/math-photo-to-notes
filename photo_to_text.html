@@ -9,7 +9,7 @@
   --bg:#f4f4f5;--card:#fff;--text:#18181b;--muted:#71717a;--line:#e4e4e7;
   --accent:#111827;--good:#047857;--goodbg:#ecfdf5;--review:#7c3aed;--reviewbg:#f5f3ff;
   --unclear:#b45309;--unclearbg:#fffbeb;--failed:#b91c1c;--failedbg:#fef2f2;
-  --approved:#166534;--approvedbg:#f0fdf4;
+  --approved:#166534;--approvedbg:#f0fdf4;--interrupted:#92400e;--interruptedbg:#fffbeb;
   --queued:#52525b;--running:#1d4ed8;--runningbg:#eff6ff
 }
 *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
@@ -20,13 +20,13 @@ label{display:block;margin:10px 0}.label{display:block;font-size:12px;font-weigh
 input,select,textarea,button{font:inherit} input,select,textarea{width:100%;padding:10px 11px;border:1px solid #d4d4d8;border-radius:12px;background:#fff}
 textarea{min-height:145px;resize:vertical}.toolbar{display:flex;flex-wrap:wrap;gap:9px;margin-top:14px}
 button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius:12px;font-weight:700;cursor:pointer}button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}button:disabled{opacity:.5;cursor:not-allowed}
-.stats{display:grid;grid-template-columns:repeat(9,1fr);gap:9px;margin-top:16px}.stat{border:1px solid var(--line);border-radius:14px;padding:11px}.stat b{font-size:23px;display:block}.stat span{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+.stats{display:grid;grid-template-columns:repeat(10,1fr);gap:9px;margin-top:16px}.stat{border:1px solid var(--line);border-radius:14px;padding:11px}.stat b{font-size:23px;display:block}.stat span{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.08em}
 .pile-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}.pile-tabs button.active{background:#111827;color:#fff}
 .card{display:grid;grid-template-columns:280px 1fr;overflow:hidden;padding:0}.side{padding:16px;border-right:1px solid var(--line);background:#fafafa}.main{padding:16px}
 .preview{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:14px;border:1px solid var(--line);margin-top:12px}.name{font-weight:800;word-break:break-word}.small{font-size:12px;color:var(--muted)}
 .badge{display:inline-block;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;border:1px solid var(--line)}
 .badge.good{color:var(--good);background:var(--goodbg)}.badge.review{color:var(--review);background:var(--reviewbg)}.badge.unclear{color:var(--unclear);background:var(--unclearbg)}.badge.mathunsure{color:#9a3412;background:#fff7ed}
-.badge.failed{color:var(--failed);background:var(--failedbg)}.badge.approved{color:var(--approved);background:var(--approvedbg)}.badge.running{color:var(--running);background:var(--runningbg)}.badge.queued{color:var(--queued);background:#f4f4f5}
+.badge.failed{color:var(--failed);background:var(--failedbg)}.badge.approved{color:var(--approved);background:var(--approvedbg)}.badge.interrupted{color:var(--interrupted);background:var(--interruptedbg)}.badge.running{color:var(--running);background:var(--runningbg)}.badge.queued{color:var(--queued);background:#f4f4f5}
 .output{width:100%;min-height:380px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.55}.reason{margin:8px 0 12px;padding:9px 11px;border:1px solid var(--line);border-radius:11px;background:#fafafa;font-size:12px}
 .error{background:var(--failedbg);color:var(--failed);padding:10px;border-radius:11px;margin:8px 0;white-space:pre-wrap}
 .hidden{display:none!important}.empty{text-align:center;padding:45px;color:var(--muted)}
@@ -54,6 +54,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     <div class="stat"><span>Failed</span><b id="s-failed">0</b></div>
     <div class="stat"><span>Queued</span><b id="s-queued">0</b></div>
     <div class="stat"><span>Running</span><b id="s-running">0</b></div>
+    <div class="stat"><span>Interrupted</span><b id="s-interrupted">0</b></div>
   </div>
 
   <div class="top">
@@ -102,6 +103,8 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
 
   <div class="toolbar">
     <button class="primary" id="run">Process batch</button>
+    <button id="cancel-batch">Cancel batch</button>
+    <button id="doctor">Doctor / Diagnostics</button>
     <span class="small" style="align-self:center;font-weight:700">Current pile:</span>
     <select id="current-ai" style="width:auto">
       <option value="primary" selected>Primary</option>
@@ -148,6 +151,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     <button id="pdf-approved">PDF: Approved</button>
     <button id="clear">Clear all</button>
   </div>
+  <div id="doctor-report" class="reason hidden" style="margin-top:12px"></div>
 </section>
 
 <section class="panel">
@@ -160,6 +164,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     <button data-filter="approved">Approved</button>
     <button data-filter="failed">Failed</button>
     <button data-filter="queued">Queued</button>
+    <button data-filter="interrupted">Interrupted</button>
   </div>
   <div id="results"></div>
 </section>
@@ -192,8 +197,20 @@ Rules:
 - Example:
   [MATH_UNSURE: seen="x ? 4" guess="$x+4$" note="operator could be + or -"] (I think it says: $x+4$)`
 
-const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarning:''};
+const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarning:'',cancelRequested:false,activeControllers:new Map()};
 const AUTOSAVE_KEY='math_photo_to_notes_phase_a_v1';
+const PROJECT_SCHEMA='math-photo-notes-project-v1';
+const DB_NAME='math-photo-to-notes';
+const DB_VERSION=1;
+const DB_PROJECTS='projects';
+const DB_CACHE='cache';
+const REQUEST_TIMEOUT_MS=90000;
+const PROVIDER_CAPABILITIES={
+ openai:{vision:true,truncation:true,usage:true,cancel:true,notes:'Responses API; image input supported when model supports vision.'},
+ anthropic:{vision:true,truncation:true,usage:true,cancel:true,notes:'Messages API; browser-direct use depends on provider policy/CORS.'},
+ gemini:{vision:true,truncation:true,usage:true,cancel:true,notes:'generateContent; finishReason used for truncation hints.'},
+ compatible:{vision:'unknown',truncation:'partial',usage:'unknown',cancel:true,notes:'Capabilities vary by endpoint; verify with Doctor and a test page.'}
+};
 
 const $=id=>document.getElementById(id);
 const els={provider:$('provider'),model:$('model'),basewrap:$('basewrap'),baseurl:$('baseurl'),apikey:$('apikey'),provider2:$('provider2'),model2:$('model2'),basewrap2:$('basewrap2'),baseurl2:$('baseurl2'),apikey2:$('apikey2'),prompt:$('prompt'),files:$('files'),drop:$('drop'),results:$('results')};
@@ -201,22 +218,86 @@ const els={provider:$('provider'),model:$('model'),basewrap:$('basewrap'),baseur
 function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
 function slug(s){return (s||'page').toLowerCase().replace(/\.[^.]+$/,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60)||'page'}
 
+function openProjectDB(){
+ return new Promise((resolve,reject)=>{
+   if(!('indexedDB' in window))return reject(new Error('IndexedDB unavailable'));
+   const req=indexedDB.open(DB_NAME,DB_VERSION);
+   req.onupgradeneeded=()=>{
+     const db=req.result;
+     if(!db.objectStoreNames.contains(DB_PROJECTS))db.createObjectStore(DB_PROJECTS);
+     if(!db.objectStoreNames.contains(DB_CACHE))db.createObjectStore(DB_CACHE);
+   };
+   req.onsuccess=()=>resolve(req.result);
+   req.onerror=()=>reject(req.error||new Error('IndexedDB open failed'));
+ });
+}
+async function idbGet(store,key){
+ const db=await openProjectDB();
+ return new Promise((resolve,reject)=>{
+   const tx=db.transaction(store,'readonly'),req=tx.objectStore(store).get(key);
+   req.onsuccess=()=>resolve(req.result);
+   req.onerror=()=>reject(req.error);
+   tx.oncomplete=()=>db.close();
+ });
+}
+async function idbPut(store,key,value){
+ const db=await openProjectDB();
+ return new Promise((resolve,reject)=>{
+   const tx=db.transaction(store,'readwrite');
+   tx.objectStore(store).put(value,key);
+   tx.oncomplete=()=>{db.close();resolve()};
+   tx.onerror=()=>{db.close();reject(tx.error)};
+ });
+}
+async function idbDelete(store,key){
+ const db=await openProjectDB();
+ return new Promise((resolve,reject)=>{
+   const tx=db.transaction(store,'readwrite');
+   tx.objectStore(store).delete(key);
+   tx.oncomplete=()=>{db.close();resolve()};
+   tx.onerror=()=>{db.close();reject(tx.error)};
+ });
+}
+async function idbCount(store){
+ const db=await openProjectDB();
+ return new Promise((resolve,reject)=>{
+   const tx=db.transaction(store,'readonly'),req=tx.objectStore(store).count();
+   req.onsuccess=()=>resolve(req.result||0);req.onerror=()=>reject(req.error);
+   tx.oncomplete=()=>db.close();
+ });
+}
 function serializableItem(i,includeImage=true){
  const copy={...i};
- delete copy.file; delete copy.url; delete copy.editingSnapshotTaken;
+ delete copy.file; delete copy.url; delete copy.editingSnapshotTaken; delete copy.activeAttemptId;
  if(!includeImage) delete copy.imageData;
+ if(copy.status==='running'){copy.status='interrupted';copy.classification='interrupted';copy.reason='Processing was interrupted before the project was restored.'}
  return copy;
 }
-function saveProjectState(){
- const payload={version:1,savedAt:new Date().toISOString(),filter:state.filter,items:state.items.map(i=>serializableItem(i,true))};
+function projectEnvelope(includeImages=true){
+ return {
+   schema:PROJECT_SCHEMA,
+   version:1,
+   savedAt:new Date().toISOString(),
+   filter:state.filter,
+   items:state.items.map(i=>serializableItem(i,includeImages))
+ };
+}
+function validateProjectEnvelope(saved){
+ if(!saved||typeof saved!=='object')throw new Error('Project is not an object.');
+ if(saved.schema&&saved.schema!==PROJECT_SCHEMA)throw new Error('Unsupported project schema: '+saved.schema);
+ if(!Array.isArray(saved.items))throw new Error('Project has no valid items array.');
+ return saved;
+}
+async function saveProjectState(){
+ const payload=projectEnvelope(true);
  try{
-   localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(payload));
+   await idbPut(DB_PROJECTS,'current',payload);
    state.autosaveWarning='';
+   try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(projectEnvelope(false)))}catch(e){}
  }catch(e){
    try{
-     payload.items=state.items.map(i=>serializableItem(i,false));
-     localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(payload));
-     state.autosaveWarning='Autosave saved text/history, but browser storage was too small to retain image copies.';
+     localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(projectEnvelope(false)));
+     state.autosaveWarning='IndexedDB autosave failed; text/history were saved to the lightweight fallback.';
    }catch(e2){
      state.autosaveWarning='Autosave failed because browser storage is full or unavailable.';
    }
@@ -224,7 +305,7 @@ function saveProjectState(){
 }
 function scheduleAutosave(){
  clearTimeout(state.autosaveTimer);
- state.autosaveTimer=setTimeout(saveProjectState,350);
+ state.autosaveTimer=setTimeout(()=>{saveProjectState().catch(()=>{})},350);
 }
 function dataUrlToFile(dataUrl,name){
  if(!dataUrl)return null;
@@ -234,13 +315,11 @@ function dataUrlToFile(dataUrl,name){
  for(let n=0;n<raw.length;n++)bytes[n]=raw.charCodeAt(n);
  return new File([bytes],name||'restored-image',{type:mime});
 }
-async function restoreProjectState(){
- let saved=null;
- try{saved=JSON.parse(localStorage.getItem(AUTOSAVE_KEY)||'null')}catch(e){}
- if(!saved||!Array.isArray(saved.items))return;
+function hydrateSavedItems(saved){
  state.filter=saved.filter||'all';
  state.items=saved.items.map((x,idx)=>{
    const file=x.imageData?dataUrlToFile(x.imageData,x.name):null;
+   const interrupted=x.status==='running'||x.status==='interrupted'||x.classification==='interrupted';
    return {
      ...x,
      id:x.id||(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+idx),
@@ -256,13 +335,58 @@ async function restoreProjectState(){
      primaryAttempts:Number(x.primaryAttempts||0),
      secondaryAttempts:Number(x.secondaryAttempts||0),
      failures:Number(x.failures||0),
+     status:interrupted?'interrupted':(x.status||'queued'),
+     classification:interrupted?'interrupted':(x.classification||'queued'),
+     reason:interrupted?'Previous processing was interrupted. Safe to resume.':(x.reason||''),
      viewMode:x.viewMode||'final',
      compareOpen:false,
-     editingSnapshotTaken:false
+     editingSnapshotTaken:false,
+     activeAttemptId:''
    };
  });
 }
-function clearAutosave(){localStorage.removeItem(AUTOSAVE_KEY)}
+async function restoreProjectState(){
+ let saved=null;
+ try{
+   saved=await idbGet(DB_PROJECTS,'current');
+   if(saved){validateProjectEnvelope(saved);hydrateSavedItems(saved);return}
+ }catch(e){
+   try{
+     const raw=JSON.stringify(saved);
+     if(raw)localStorage.setItem('math_photo_to_notes_recovery_'+Date.now(),raw);
+   }catch(_){}
+   state.autosaveWarning='IndexedDB project could not be loaded; trying fallback recovery.';
+ }
+ try{
+   const raw=localStorage.getItem(AUTOSAVE_KEY);
+   if(!raw)return;
+   saved=JSON.parse(raw);validateProjectEnvelope(saved);hydrateSavedItems(saved);
+ }catch(e){
+   state.autosaveWarning='Saved project data is malformed. It was not overwritten.';
+ }
+}
+async function clearAutosave(){
+ localStorage.removeItem(AUTOSAVE_KEY);
+ try{await idbDelete(DB_PROJECTS,'current')}catch(e){}
+}
+async function sha256Hex(data){
+ if(!crypto?.subtle)return '';
+ const buf=data instanceof ArrayBuffer?data:new TextEncoder().encode(String(data));
+ const digest=await crypto.subtle.digest('SHA-256',buf);
+ return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function imageHashForFile(file){
+ if(!file||!file.arrayBuffer)return '';
+ return sha256Hex(await file.arrayBuffer());
+}
+async function processingFingerprint(item,s){
+ const ih=item.imageHash||await imageHashForFile(item.file);
+ if(ih&&!item.imageHash)item.imageHash=ih;
+ return sha256Hex([ih,s.provider,s.model,s.baseUrl||'',s.prompt||''].join('\n---\n'));
+}
+async function cacheGet(key){try{return await idbGet(DB_CACHE,key)}catch(e){return null}}
+async function cachePut(key,value){try{await idbPut(DB_CACHE,key,value)}catch(e){}}
+
 function saveSettings(){
  localStorage.setItem('sorted_ocr_provider',els.provider.value);
  localStorage.setItem('sorted_ocr_model',els.model.value.trim());
@@ -317,8 +441,10 @@ async function addFiles(list){
      status:'queued',classification:'queued',reason:'Waiting to be processed.',
      text:'',rawText:'',repairedText:'',finalText:'',error:'',repairs:[],validationWarnings:[],history:[],
      primaryAttempts:0,secondaryAttempts:0,failures:0,lastError:'',truncated:false,stopReason:'',
-     viewMode:'final',compareOpen:false,editingSnapshotTaken:false
+     viewMode:'final',compareOpen:false,editingSnapshotTaken:false,imageHash:'',lastFingerprint:'',lastAttemptId:''
    });
+   try{state.items[state.items.length-1].imageHash=await imageHashForFile(f)}catch(e){}
+
  }
  scheduleAutosave(); render();
 }
@@ -491,10 +617,11 @@ function classifyText(text){
 }
 
 function stats(){
- const counts={total:state.items.length,good:0,review:0,unclear:0,mathunsure:0,approved:0,failed:0,queued:0,running:0};
+ const counts={total:state.items.length,good:0,review:0,unclear:0,mathunsure:0,approved:0,failed:0,queued:0,running:0,interrupted:0};
  state.items.forEach(i=>{
    if(i.status==='running')counts.running++;
    else if(i.status==='queued')counts.queued++;
+   else if(i.status==='interrupted'||i.classification==='interrupted')counts.interrupted++;
    else if(i.classification in counts)counts[i.classification]++;
  });
  return counts;
@@ -504,10 +631,10 @@ function renderStats(){
 }
 function visibleItems(){
  if(state.filter==='all') return state.items;
- return state.items.filter(i=>i.classification===state.filter || (state.filter==='queued'&&i.status==='queued'));
+ return state.items.filter(i=>i.classification===state.filter || (state.filter==='queued'&&i.status==='queued') || (state.filter==='interrupted'&&i.status==='interrupted'));
 }
-function badgeClass(i){return i.status==='running'?'running':i.status==='queued'?'queued':i.classification}
-function badgeLabel(i){return i.status==='running'?'Running':i.status==='queued'?'Queued':({good:'Good',review:'Review',unclear:'Unclear',mathunsure:'Math Unsure',approved:'Approved',failed:'Failed'})[i.classification]||i.classification}
+function badgeClass(i){return i.status==='running'?'running':i.status==='queued'?'queued':i.status==='interrupted'?'interrupted':i.classification}
+function badgeLabel(i){return i.status==='running'?'Running':i.status==='queued'?'Queued':i.status==='interrupted'?'Interrupted':({good:'Good',review:'Review',unclear:'Unclear',mathunsure:'Math Unsure',approved:'Approved',failed:'Failed',interrupted:'Interrupted'})[i.classification]||i.classification}
 function pushRevision(i,label){
  if(!(i.rawText||i.repairedText||i.finalText||i.text))return;
  i.history=i.history||[];
@@ -542,10 +669,11 @@ function render(){
    return `
  <section class="panel card">
   <aside class="side">
-   <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}<div class="small">Attempts: Primary ${i.primaryAttempts||0} · Secondary ${i.secondaryAttempts||0} · Failures ${i.failures||0}</div></div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
+   <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}<div class="small">Attempts: Primary ${i.primaryAttempts||0} · Secondary ${i.secondaryAttempts||0} · Failures ${i.failures||0}</div>${i.imageHash?`<div class="small">Image hash: ${esc(i.imageHash.slice(0,12))}…</div>`:''}</div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
    ${i.url?`<img class="preview" src="${i.url}" alt="${esc(i.name)}">`:'<div class="reason">Original image was not retained by browser autosave. Text/history are still available.</div>'}
    <div class="toolbar">
     ${i.classification==='approved'?'<button onclick="unapprove(\''+i.id+'\')">Unapprove</button>':`<button onclick="runSingleById('${i.id}')">Run again with Primary</button>`}
+    ${i.status==='running'?`<button onclick="cancelItem('${i.id}')">Cancel request</button>`:''}
     ${i.history&&i.history.length?`<button onclick="restorePrevious('${i.id}')">Restore previous</button>`:''}
     <button onclick="toggleCompare('${i.id}')">Compare versions</button>
     <button onclick="removeById('${i.id}')">Remove</button>
@@ -618,7 +746,10 @@ window.restorePrevious=id=>{
  i.status=i.classification==='failed'?'error':'done';i.error='';i.editingSnapshotTaken=false;
  scheduleAutosave();render();
 };
-window.removeById=id=>{const i=state.items.find(x=>x.id===id);if(i&&i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url);state.items=state.items.filter(x=>x.id!==id);scheduleAutosave();render()};
+window.cancelItem=id=>{
+ const ctrl=state.activeControllers.get(id);if(ctrl)ctrl.abort();
+};
+window.removeById=id=>{const i=state.items.find(x=>x.id===id);if(i&&i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url);const ctrl=state.activeControllers.get(id);if(ctrl)ctrl.abort();state.items=state.items.filter(x=>x.id!==id);scheduleAutosave();render()};
 
 function dataURL(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result||''));r.onerror=()=>rej(new Error('Failed to read '+file.name));r.readAsDataURL(file)})}
 function b64(d){return d.split(',')[1]||''}
@@ -631,31 +762,32 @@ function extractAnthropic(j){return (j?.content||[]).filter(x=>x?.type==='text')
 function extractGemini(j){return (j?.candidates?.[0]?.content?.parts||[]).map(x=>x?.text||'').filter(Boolean).join('\n\n').trim()}
 function extractCompatible(j){const c=j?.choices?.[0]?.message?.content;if(typeof c==='string')return c.trim();if(Array.isArray(c))return c.map(x=>x?.text||'').filter(Boolean).join('\n\n').trim();return ''}
 
-async function transcribe(item,s){
+async function transcribe(item,s,signal){
  if(!item.file)throw new Error('Original image is unavailable after restore. Re-add the image before retrying.');
  const d=item.imageData||await dataURL(item.file), base=b64(d), mime=item.file.type||'image/jpeg';
- let response,j,text='',truncated=false,stopReason='';
+ let response,j,text='',truncated=false,stopReason='',usage=null;
+ const fetchOpts=(body,headers)=>({method:'POST',headers,body:JSON.stringify(body),signal});
  if(s.provider==='openai'){
-   response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+s.apiKey},body:JSON.stringify({model:s.model,input:[{role:'user',content:[{type:'input_text',text:s.prompt},{type:'input_image',image_url:d}]}]})});
+   response=await fetch('https://api.openai.com/v1/responses',fetchOpts({model:s.model,input:[{role:'user',content:[{type:'input_text',text:s.prompt},{type:'input_image',image_url:d}]}]},{'Content-Type':'application/json','Authorization':'Bearer '+s.apiKey}));
    j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'OpenAI request failed.'); text=extractOpenAI(j);
-   stopReason=j?.incomplete_details?.reason||j?.status||''; truncated=j?.status==='incomplete'||/max.*token|length/i.test(stopReason);
+   stopReason=j?.incomplete_details?.reason||j?.status||''; truncated=j?.status==='incomplete'||/max.*token|length/i.test(stopReason);usage=j?.usage||null;
  }else if(s.provider==='anthropic'){
-   response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':s.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:s.model,max_tokens:4096,temperature:0,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:mime,data:base}},{type:'text',text:s.prompt}]}]})});
+   response=await fetch('https://api.anthropic.com/v1/messages',fetchOpts({model:s.model,max_tokens:4096,temperature:0,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:mime,data:base}},{type:'text',text:s.prompt}]}]},{'Content-Type':'application/json','x-api-key':s.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'}));
    j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'Anthropic request failed.'); text=extractAnthropic(j);
-   stopReason=j?.stop_reason||''; truncated=stopReason==='max_tokens';
+   stopReason=j?.stop_reason||''; truncated=stopReason==='max_tokens';usage=j?.usage||null;
  }else if(s.provider==='gemini'){
    const ep=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent?key=${encodeURIComponent(s.apiKey)}`;
-   response=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:s.prompt},{inlineData:{mimeType:mime,data:base}}]}],generationConfig:{temperature:0}})});
+   response=await fetch(ep,fetchOpts({contents:[{parts:[{text:s.prompt},{inlineData:{mimeType:mime,data:base}}]}],generationConfig:{temperature:0}},{'Content-Type':'application/json'}));
    j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'Gemini request failed.'); text=extractGemini(j);
-   stopReason=j?.candidates?.[0]?.finishReason||''; truncated=/MAX_TOKENS|TOKEN/i.test(stopReason);
+   stopReason=j?.candidates?.[0]?.finishReason||''; truncated=/MAX_TOKENS|TOKEN/i.test(stopReason);usage=j?.usageMetadata||null;
  }else{
    const u=s.baseUrl.replace(/\/$/,''); if(!u)throw new Error('Enter a compatible base URL.');
-   response=await fetch(u+'/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+s.apiKey},body:JSON.stringify({model:s.model,messages:[{role:'user',content:[{type:'text',text:s.prompt},{type:'image_url',image_url:{url:d}}]}],temperature:0})});
+   response=await fetch(u+'/chat/completions',fetchOpts({model:s.model,messages:[{role:'user',content:[{type:'text',text:s.prompt},{type:'image_url',image_url:{url:d}}]}],temperature:0},{'Content-Type':'application/json','Authorization':'Bearer '+s.apiKey}));
    j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'Compatible-provider request failed.'); text=extractCompatible(j);
-   stopReason=j?.choices?.[0]?.finish_reason||''; truncated=stopReason==='length';
+   stopReason=j?.choices?.[0]?.finish_reason||''; truncated=stopReason==='length';usage=j?.usage||null;
  }
  if(!text)throw new Error('No text returned by provider.');
- return {text,truncated,stopReason};
+ return {text,truncated,stopReason,usage};
 }
 
 function snapPrimary(){return{provider:els.provider.value,model:els.model.value.trim(),apiKey:els.apikey.value.trim(),baseUrl:els.baseurl.value.trim(),prompt:els.prompt.value,pass:'primary'}}
@@ -667,55 +799,111 @@ function snapForChoice(choice){
 
 function validateSnap(s){if(!s.apiKey){alert(`Enter the ${s.pass||'selected'} AI API key first.`);return false}if(!s.model){alert('Enter a model name.');return false}if(s.provider==='compatible'&&!s.baseUrl){alert('Enter a compatible base URL.');return false}return true}
 
-async function runOne(i,s){
- if(i.classification==='approved'){return}
+async function runOne(i,s,{forceFresh=false}={}){
+ if(i.classification==='approved')return;
+ if(i.status==='running')return;
+ const attemptId=(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random());
+ const controller=new AbortController();
+ state.activeControllers.set(i.id,controller);
+ i.activeAttemptId=attemptId;i.lastAttemptId=attemptId;
  pushRevision(i,'Before '+(s.pass||'primary')+' retry');
  if((s.pass||'primary')==='secondary')i.secondaryAttempts=(i.secondaryAttempts||0)+1;
  else i.primaryAttempts=(i.primaryAttempts||0)+1;
- i.status='running';i.classification='queued';i.reason='Processing…';i.error='';i.editingSnapshotTaken=false;render();
+ i.status='running';i.classification='queued';i.reason='Processing…';i.error='';i.editingSnapshotTaken=false;
+ const timeout=setTimeout(()=>controller.abort(new DOMException('Request timed out','AbortError')),REQUEST_TIMEOUT_MS);
+ render();
  try{
-   const result=await transcribe(i,s);
+   const fingerprint=await processingFingerprint(i,s);
+   i.lastFingerprint=fingerprint;
+   let result=null,cached=false;
+   if(!forceFresh&&fingerprint){
+     const hit=await cacheGet(fingerprint);
+     if(hit&&hit.rawText){result={text:hit.rawText,truncated:!!hit.truncated,stopReason:hit.stopReason||'',usage:hit.usage||null};cached=true}
+   }
+   if(!result)result=await transcribe(i,s,controller.signal);
+   if(i.activeAttemptId!==attemptId)return;
    const rawText=result.text;
    const repaired=repairLatexForMathJax(rawText);
-   let c=classifyText(repaired.text);
+   let cl=classifyText(repaired.text);
    const validationWarnings=latexStructuralWarnings(repaired.text);
-   if(result.truncated)c={classification:'review',reason:'Possible truncated response; provider indicated output may have stopped early.'};
-   i.rawText=rawText;
-   i.repairedText=repaired.text;
-   i.finalText=repaired.text;
-   i.text=i.finalText;i.repairs=repaired.repairs;i.validationWarnings=validationWarnings;
-   i.truncated=!!result.truncated;i.stopReason=result.stopReason||'';
-   i.status='done';i.classification=c.classification;i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
-   i.reason=(repaired.repairs.length?`Auto-repaired ${repaired.repairs.length} common LaTeX artifact${repaired.repairs.length===1?'':'s'}. `:'')+c.reason;
+   if(result.truncated)cl={classification:'review',reason:'Possible truncated response; provider indicated output may have stopped early.'};
+   i.rawText=rawText;i.repairedText=repaired.text;i.finalText=repaired.text;i.text=i.finalText;
+   i.repairs=repaired.repairs;i.validationWarnings=validationWarnings;i.truncated=!!result.truncated;i.stopReason=result.stopReason||'';
+   i.usage=result.usage||null;i.status='done';i.classification=cl.classification;i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
+   i.reason=(cached?'Reused exact cached result. ':'')+(repaired.repairs.length?`Auto-repaired ${repaired.repairs.length} common LaTeX artifact${repaired.repairs.length===1?'':'s'}. `:'')+cl.reason;
    i.error='';i.lastError='';
+   if(!cached&&fingerprint)await cachePut(fingerprint,{schema:PROJECT_SCHEMA,createdAt:new Date().toISOString(),rawText,result:{truncated:!!result.truncated,stopReason:result.stopReason||''},truncated:!!result.truncated,stopReason:result.stopReason||'',usage:result.usage||null,provider:s.provider,model:s.model});
  }catch(e){
-   i.failures=(i.failures||0)+1;
-   i.status='error';i.classification='failed';i.error=e instanceof Error?e.message:String(e);i.lastError=i.error;
-   i.reason='The API/browser request failed, so no usable transcription was produced.';
+   if(i.activeAttemptId!==attemptId)return;
+   if(e?.name==='AbortError'){
+     i.status='interrupted';i.classification='interrupted';i.error='';i.reason='Request cancelled or timed out. Safe to resume.';
+   }else{
+     i.failures=(i.failures||0)+1;i.status='error';i.classification='failed';i.error=e instanceof Error?e.message:String(e);i.lastError=i.error;
+     i.reason='The API/browser request failed, so no usable transcription was produced.';
+   }
+ }finally{
+   clearTimeout(timeout);
+   if(i.activeAttemptId===attemptId)i.activeAttemptId='';
+   state.activeControllers.delete(i.id);
+   scheduleAutosave();render();
  }
- scheduleAutosave();render();
 }
 
-window.runSingleById=async id=>{if(state.running)return;const i=state.items.find(x=>x.id===id);if(!i)return;if(i.classification==='approved'){alert('Unapprove this page before retrying it.');return}const s=snapPrimary();if(!validateSnap(s))return;await runOne(i,s)};
+window.runSingleById=async id=>{if(state.running)return;const i=state.items.find(x=>x.id===id);if(!i)return;if(i.classification==='approved'){alert('Unapprove this page before retrying it.');return}const s=snapPrimary();if(!validateSnap(s))return;await runOne(i,s,{forceFresh:true})};
 
 async function runList(list,s){
  if(state.running)return;
  if(!list.length){alert('There are no items in this pile to process.');return;}
  if(!s) s=snapPrimary();
  if(!validateSnap(s))return;
- state.running=true;
+ state.running=true;state.cancelRequested=false;
  ['run','retry-current-primary','retry-review','retry-unclear','retry-mathunsure','retry-failed'].forEach(id=>{const b=$(id);if(b)b.disabled=true});
- for(const i of list)await runOne(i,s);
- state.running=false;
+ for(const i of list){if(state.cancelRequested)break;await runOne(i,s,{forceFresh:i.status!=='queued'})}
+ state.running=false;state.cancelRequested=false;
  ['run','retry-current-primary','retry-review','retry-unclear','retry-mathunsure','retry-failed'].forEach(id=>{const b=$(id);if(b)b.disabled=false});
  render();
 }
-$('run').onclick=()=>runList(state.items.filter(i=>i.status==='queued'),snapPrimary());
+$('run').onclick=()=>runList(state.items.filter(i=>i.status==='queued'||i.status==='interrupted'),snapPrimary());
+$('cancel-batch').onclick=()=>{state.cancelRequested=true;for(const ctrl of state.activeControllers.values())ctrl.abort();};
 $('retry-current-primary').onclick=()=>runList(visibleItems().filter(i=>i.status!=='running'&&i.classification!=='approved'),snapForChoice($('current-ai').value));
 $('retry-review').onclick=()=>runList(state.items.filter(i=>i.classification==='review'),snapForChoice($('review-ai').value));
 $('retry-unclear').onclick=()=>runList(state.items.filter(i=>i.classification==='unclear'),snapForChoice($('unclear-ai').value));
 $('retry-mathunsure').onclick=()=>runList(state.items.filter(i=>i.classification==='mathunsure'),snapForChoice($('mathunsure-ai').value));
 $('retry-failed').onclick=()=>runList(state.items.filter(i=>i.classification==='failed'),snapForChoice($('failed-ai').value));
+
+async function runDoctor(){
+ const box=$('doctor-report');box.classList.remove('hidden');box.innerHTML='<b>Doctor:</b> checking…';
+ const p=snapPrimary(),s=snapSecondary(),caps1=PROVIDER_CAPABILITIES[p.provider]||{},caps2=PROVIDER_CAPABILITIES[s.provider]||{};
+ let quota='Unavailable',cacheCount='Unavailable',idb='OK';
+ try{await openProjectDB()}catch(e){idb='Unavailable: '+e.message}
+ try{cacheCount=await idbCount(DB_CACHE)}catch(e){}
+ try{if(navigator.storage?.estimate){const q=await navigator.storage.estimate();quota=Math.round((q.usage||0)/1048576)+' MB used / '+Math.round((q.quota||0)/1048576)+' MB quota'}}catch(e){}
+ const interrupted=state.items.filter(i=>i.status==='interrupted').length;
+ const lines=[
+   ['Project schema',PROJECT_SCHEMA],
+   ['IndexedDB',idb],
+   ['Storage',quota],
+   ['Web Crypto',crypto?.subtle?'Available':'Unavailable — hashes/cache fingerprints disabled'],
+   ['AbortController',typeof AbortController!=='undefined'?'Available':'Unavailable'],
+   ['Request timeout',Math.round(REQUEST_TIMEOUT_MS/1000)+' seconds'],
+   ['Cached results',String(cacheCount)],
+   ['Interrupted jobs',String(interrupted)],
+   ['Primary',p.provider+' / '+(p.model||'(model missing)')],
+   ['Primary key',p.apiKey?'Present (not stored)':'Missing'],
+   ['Primary vision capability',String(caps1.vision)],
+   ['Primary notes',caps1.notes||''],
+   ['Secondary',s.provider+' / '+(s.model||'(model missing)')],
+   ['Secondary key',s.apiKey?'Present (not stored)':'Missing'],
+   ['Secondary vision capability',String(caps2.vision)],
+   ['Secondary notes',caps2.notes||'']
+ ];
+ let next='Ready.';
+ if(idb!=='OK')next='Fix browser storage/privacy settings before a large batch.';
+ else if(!p.model||!p.apiKey)next='Configure the Primary AI model and API key before processing.';
+ else if(interrupted)next='Resume the interrupted items with Process batch.';
+ box.innerHTML='<b>Doctor report</b><br>'+lines.map(x=>'<b>'+esc(x[0])+':</b> '+esc(x[1])).join('<br>')+'<br><br><b>Next action:</b> '+esc(next);
+}
+$('doctor').onclick=()=>runDoctor();
 
 $('tabs').onclick=e=>{
  const b=e.target.closest('button[data-filter]');if(!b)return;
@@ -839,7 +1027,7 @@ $('pdf-unclear').onclick=()=>exportPdfPile(state.items.filter(i=>i.classificatio
 $('pdf-mathunsure').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='mathunsure'),'Photo-to-Text — Math Unsure pile');
 $('pdf-approved').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='approved'),'Photo-to-Text — Approved');
 
-$('clear').onclick=()=>{if(!confirm('Clear all loaded images and results?'))return;state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});state.items=[];clearAutosave();render()};
+$('clear').onclick=async()=>{if(!confirm('Clear all loaded images and results?'))return;state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});for(const ctrl of state.activeControllers.values())ctrl.abort();state.items=[];await clearAutosave();render()};
 
 loadSettings();
 restoreProjectState().then(()=>{
