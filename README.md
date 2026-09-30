@@ -18,6 +18,8 @@ Release B adds **Good-page spot checks**. A completed batch can randomly sample 
 
 Release C adds **Review with External AI** as a full export/import round trip. Problem pages are packaged in 5/10/20-page chunks with source images, stable IDs, transcriptions, warnings, a ready-made prompt, and an exact return template. Returned AI text is treated only as a proposal: tolerant import reports unknown/duplicate/malformed/missing pages, then requires a source/current/proposed diff review before Accept / Reject / Edit. Accepted changes preserve revision/provenance and Approved lineage; external AI can never approve or directly classify a page.
 
+Post-Release-C hardening makes math returns **LaTeX-safe**. The preferred external-AI response is now a plain `=== PAGE ... ===` block format, so commands such as `\frac`, `\theta`, and `\neq` do not pass through JSON escape semantics. JSON remains a fallback, but unsafe single-backslash LaTeX is rejected instead of silently corrupted. External review can be exported either as a ZIP or as **Loose images + text** for direct chat upload. The spot-check reliability ledger is also stored separately in IndexedDB and survives **Clear all** and reload; project files carry a portable snapshot that merges into the global ledger.
+
 **High Assurance Math** is shown as a disabled future option and is not active yet.
 
 ## Current capabilities
