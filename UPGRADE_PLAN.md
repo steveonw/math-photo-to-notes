@@ -973,6 +973,10 @@ Live MathJax preview + stronger EquationWright validation.
 ### Upgrade 5
 Side-by-side guided review + anchored flags + Needs Reapproval behavior.
 
+**Status:** Implemented on 2026-09-30.
+
+Implemented capabilities include guided one-page review, previous/next navigation, image zoom/fit/rotation, keyboard review shortcuts, persistent text-anchored review flags with re-anchoring after edits, and automatic Approved → Needs Reapproval transitions when final transcription text changes.
+
 ### Upgrade 6
 Durable queue manager + concurrency + pause/resume + retry/backoff.
 
