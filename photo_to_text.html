@@ -941,7 +941,15 @@ function versionText(i,mode){
  if(mode==='repaired')return i.repairedText||'';
  return i.finalText||i.text||'';
 }
-function currentGuidedList(){return visibleItems()}
+function flaggedReviewItems(pageIds=null){
+ const allowed=new Set(['review','unclear','mathunsure','needsreapproval','needsrefresh']);
+ const ids=Array.isArray(pageIds)?new Set(pageIds):null;
+ return organizationScopedItems().filter(i=>(!ids||ids.has(i.id))&&allowed.has(i.classification));
+}
+function currentGuidedList(){
+ if(state.guidedReview&&state.guidedScope==='flagged')return flaggedReviewItems(state.guidedPageIds);
+ return visibleItems();
+}
 function syncGuidedItem(list){
  if(!state.guidedReview)return;
  if(!list.length){state.guidedItemId=null;return}
@@ -1078,6 +1086,93 @@ function autoRoutingEnabled(){return !!$('auto-routing')?.checked}
 function autoMaxAttempts(){const n=Number($('auto-max-attempts')?.value||2);return Math.max(2,Math.min(4,Number.isFinite(n)?n:2))}
 function autoCachePolicy(){return $('auto-cache-policy')?.value==='reuse'?'reuse':'fresh'}
 function totalProcessingAttempts(i){return Number(i?.primaryAttempts||0)+Number(i?.secondaryAttempts||0)}
+function batchSummaryCounts(pageIds){
+ const counts={good:0,review:0,mathunsure:0,unclear:0,needsreapproval:0,needsrefresh:0,interrupted:0,failed:0,approved:0,other:0};
+ const ids=new Set(Array.isArray(pageIds)?pageIds:[]);
+ for(const i of state.items){
+   if(!ids.has(i.id))continue;
+   if(i.status==='interrupted'||i.classification==='interrupted')counts.interrupted++;
+   else if(i.status==='error'||i.classification==='failed')counts.failed++;
+   else if(i.classification in counts)counts[i.classification]++;
+   else counts.other++;
+ }
+ return counts;
+}
+function buildBatchSummary(plan){
+ const pageIds=[...new Set(Array.isArray(plan?.pageIds)?plan.pageIds:(plan?.jobs||[]).map(j=>j.id).filter(Boolean))];
+ return {
+   id:plan?.id||'',
+   label:plan?.label||'Batch',
+   kind:plan?.kind||'batch',
+   startedAt:plan?.createdAt||'',
+   completedAt:new Date().toISOString(),
+   pageIds,
+   autoFix:!!plan?.autoFixAtStart,
+   counts:batchSummaryCounts(pageIds)
+ };
+}
+function renderBatchSummary(){
+ const box=$('batch-summary');if(!box)return;
+ const summary=state.lastBatchSummary;
+ if(!summary||state.running||state.queuePlan){box.classList.add('hidden');box.innerHTML='';return}
+ const counts=batchSummaryCounts(summary.pageIds);
+ const total=summary.pageIds.length;
+ const flagged=counts.review+counts.mathunsure+counts.unclear+counts.needsreapproval+counts.needsrefresh;
+ const interrupted=counts.interrupted,failed=counts.failed;
+ const failedItems=state.items.filter(i=>summary.pageIds.includes(i.id)&&i.classification==='failed');
+ const failedPass=$('failed-ai')?.value||'secondary';
+ const retryableFailed=failedItems.filter(i=>eligibleAutomaticFailure(i,failedPass,i.lastPass||'primary')).length;
+ const configBlocked=Math.max(0,failedItems.length-retryableFailed);
+ const stat=(label,n)=>'<div class="batch-summary-stat"><b>'+n+'</b><span>'+esc(label)+'</span></div>';
+ box.classList.remove('hidden');
+ box.innerHTML='<h2>'+esc(summary.label||'Batch')+' complete — '+total+' page'+(total===1?'':'s')+'</h2>'+
+   '<div class="small">'+(summary.autoFix?'Auto-fix flagged pages was enabled.':'Quick Transcribe used one semantic pass per page; no automatic second-pass AI routing.')+'</div>'+
+   '<div class="batch-summary-grid">'+
+     stat('Good',counts.good)+stat('Review',counts.review)+stat('Math Unsure',counts.mathunsure)+stat('Unclear',counts.unclear)+
+     stat('Interrupted',counts.interrupted)+stat('Failed',counts.failed)+
+     (counts.needsreapproval?stat('Needs Reapproval',counts.needsreapproval):'')+
+     (counts.needsrefresh?stat('Needs Refresh',counts.needsrefresh):'')+
+   '</div>'+
+   '<div class="batch-summary-note"><b>Good means no automatic warning signals were detected.</b> It does not mean independently verified or guaranteed correct.</div>'+
+   '<div class="batch-summary-actions">'+
+     '<button id="summary-review-flagged"'+(flagged?'':' disabled')+'>Review '+flagged+' flagged page'+(flagged===1?'':'s')+'</button>'+
+     '<button id="summary-resume-interrupted"'+(interrupted?'':' disabled')+'>Resume '+interrupted+' interrupted</button>'+
+     '<button id="summary-retry-failed"'+(retryableFailed?'':' disabled')+'>Retry '+retryableFailed+' failed</button>'+
+     (configBlocked?'<span class="small" style="align-self:center">'+configBlocked+' failed page'+(configBlocked===1?' needs':'s need')+' configuration or a different AI choice.</span>':'')+
+     '<button id="summary-export-all">Export everything</button>'+
+   '</div>';
+ const review=$('summary-review-flagged'),resume=$('summary-resume-interrupted'),retry=$('summary-retry-failed'),exp=$('summary-export-all');
+ if(review)review.onclick=()=>openBatchFlaggedReview(summary.pageIds);
+ if(resume)resume.onclick=()=>resumeBatchInterrupted(summary.pageIds);
+ if(retry)retry.onclick=()=>retryBatchFailed(summary.pageIds);
+ if(exp)exp.onclick=()=>$('download-all')?.click();
+}
+function openBatchFlaggedReview(pageIds){
+ const list=flaggedReviewItems(pageIds);
+ if(!list.length){alert('There are no flagged pages from this batch to review.');return}
+ state.guidedReview=true;state.guidedScope='flagged';state.guidedPageIds=[...pageIds];state.guidedItemId=list[0].id;
+ render();setTimeout(()=>window.scrollTo({top:$('results')?.offsetTop||0,behavior:'smooth'}),0);
+}
+function resumeBatchInterrupted(pageIds){
+ const ids=new Set(pageIds||[]);
+ const list=state.items.filter(i=>ids.has(i.id)&&(i.status==='interrupted'||i.classification==='interrupted'));
+ if(!list.length){alert('There are no interrupted pages from this batch to resume.');return}
+ startQueue(list,snapPrimary(),{
+   kind:'resume-interrupted',label:'Interrupted recovery',showSummary:true,
+   passForItem:i=>i.lastPass==='secondary'?'secondary':'primary'
+ });
+}
+function retryBatchFailed(pageIds){
+ const ids=new Set(pageIds||[]),pass=$('failed-ai')?.value||'secondary';
+ const all=state.items.filter(i=>ids.has(i.id)&&i.classification==='failed');
+ const eligible=all.filter(i=>eligibleAutomaticFailure(i,pass,i.lastPass||'primary'));
+ if(!eligible.length){
+   alert(all.length?'These failed pages need configuration changes, the original image, or a different AI choice before retrying.':'There are no failed pages from this batch to retry.');
+   return;
+ }
+ if(eligible.length<all.length)alert((all.length-eligible.length)+' failed page'+(all.length-eligible.length===1?' was':'s were')+' skipped because the current retry choice would repeat a known configuration/authentication problem.');
+ startQueue(eligible,snapForChoice(pass),{kind:'retry-failed',label:'Failed-page retry',showSummary:true});
+}
 function renderQueueStatus(){
  const status=$('queue-status'),pause=$('pause-queue'),concurrency=$('concurrency'),autoStatus=$('auto-routing-status');
  if(concurrency)concurrency.disabled=!!state.running;
@@ -1098,9 +1193,10 @@ function renderQueueStatus(){
 function render(){
  renderStats();
  renderQueueStatus();
+ renderBatchSummary();
  renderOrganizationControls();
  renderUsageSummary();
- const allList=visibleItems();
+ const allList=state.guidedReview?currentGuidedList():visibleItems();
  syncGuidedItem(allList);
  let list=allList;
  if(state.guidedReview&&state.guidedItemId)list=allList.filter(x=>x.id===state.guidedItemId);
@@ -1805,21 +1901,31 @@ function queueConcurrency(){
 function queueButtonsDisabled(disabled){
  ['run','retry-current-primary','retry-review','retry-unclear','retry-mathunsure','retry-failed'].forEach(id=>{const b=$(id);if(b)b.disabled=!!disabled});
 }
-function startQueue(list,s){
+function startQueue(list,s,options={}){
  if(state.queuePlan){alert('A saved queue already exists. Resume or cancel it before starting another queue.');return}
  if(state.running||state.activeControllers.size){alert('A queue or request is already running.');return}
  if(!list.length){alert('There are no items in this pile to process.');return}
  if(!s)s=snapPrimary();
- if(!validateSnap(s))return;
+ const passForItem=typeof options.passForItem==='function'?options.passForItem:(()=>s.pass||'primary');
+ const candidatePasses=[...new Set(list.map(i=>passForItem(i)).filter(x=>x==='primary'||x==='secondary'))];
+ if(!candidatePasses.length)candidatePasses.push(s.pass||'primary');
+ for(const pass of candidatePasses){if(!validateSnap(snapForChoice(pass)))return}
  const seen=new Set();
  const jobs=[];
  for(const item of list){
    if(!item||seen.has(item.id)||item.classification==='approved'||item.status==='running')continue;
    seen.add(item.id);
-   jobs.push({id:item.id,state:'pending',pass:s.pass||'primary',forceFresh:!(item.status==='queued'||item.status==='interrupted'),autoRoute:false,createdAt:new Date().toISOString()});
+   const pass=passForItem(item)==='secondary'?'secondary':'primary';
+   jobs.push({id:item.id,state:'pending',pass,forceFresh:!(item.status==='queued'||item.status==='interrupted'),autoRoute:false,createdAt:new Date().toISOString()});
  }
  if(!jobs.length){alert('There are no eligible items to process.');return}
- state.queuePlan={id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random(),pass:s.pass||'primary',provider:s.provider,model:s.model,createdAt:new Date().toISOString(),jobs};
+ if(options.showSummary)state.lastBatchSummary=null;
+ const id=crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random();
+ state.queuePlan={
+   id,pass:s.pass||'primary',provider:s.provider,model:s.model,createdAt:new Date().toISOString(),jobs,
+   pageIds:[...seen],kind:options.kind||'manual',label:options.label||'Batch',showSummary:!!options.showSummary,
+   autoFixAtStart:autoRoutingEnabled()
+ };
  refreshQueueRuntimeSnaps();state.queueRuntimeSnap=s;state.queueRuntimeSnaps[s.pass||'primary']=s;state.queuePaused=false;state.cancelRequested=false;state.running=true;
  queueButtonsDisabled(true);scheduleAutosave();render();pumpQueue();
 }
@@ -1827,6 +1933,7 @@ function finishQueueIfDone(){
  const plan=state.queuePlan;if(!plan)return false;
  const jobs=plan.jobs||[];
  if(jobs.some(j=>j.state==='pending'||j.state==='running'))return false;
+ if(plan.showSummary)state.lastBatchSummary=buildBatchSummary(plan);
  state.queuePlan=null;state.queueRuntimeSnap=null;state.queueRuntimeSnaps={};state.queuePaused=false;state.running=false;state.cancelRequested=false;
  queueButtonsDisabled(false);scheduleAutosave();render();return true;
 }
@@ -1972,7 +2079,11 @@ function cancelQueue(){
  queueButtonsDisabled(state.running);
  scheduleAutosave();render();
 }
-$('run').onclick=()=>startQueue(state.items.filter(i=>i.status==='queued'||i.status==='interrupted'),snapPrimary());
+$('run').onclick=()=>startQueue(
+ state.items.filter(i=>i.status==='queued'||i.status==='interrupted'),
+ snapPrimary(),
+ {kind:'process',label:autoRoutingEnabled()?'Batch with Auto-fix':'Quick Transcribe',showSummary:true}
+);
 $('pause-queue').onclick=()=>state.queuePaused?resumeQueue():pauseQueue();
 $('cancel-batch').onclick=()=>cancelQueue();
 $('retry-current-primary').onclick=()=>startQueue(visibleItems().filter(i=>i.status!=='running'&&i.classification!=='approved'),snapForChoice($('current-ai').value));
@@ -2027,6 +2138,9 @@ async function runA2SelfTests(){
  test('audit manifest contains no API keys',!/apiKey|apikey/i.test(JSON.stringify(auditManifest([]))));
  const zipProbe=buildStoreZip([{name:'test.txt',bytes:utf8Bytes('ok')}]);
  test('ZIP writer returns an archive blob',zipProbe instanceof Blob&&zipProbe.size>20);
+ const summaryProbe={id:'batch-test',pageIds:['a','b'],label:'Quick Transcribe',showSummary:true};
+ test('batch summary preserves unique run page IDs',buildBatchSummary(summaryProbe).pageIds.length===2);
+ test('Quick Transcribe auto-fix is opt-in',autoRoutingEnabled()===!!$('auto-routing')?.checked);
  return {passed:tests.filter(x=>x.ok).length,total:tests.length,tests};
 }
 
@@ -2126,7 +2240,7 @@ els.results.addEventListener('dragend',()=>{state.dragItemId=null;document.query
 
 $('tabs').onclick=e=>{
  const b=e.target.closest('button[data-filter]');if(!b)return;
- state.filter=b.dataset.filter;state.guidedItemId=null;document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===b));render();
+ state.filter=b.dataset.filter;state.guidedItemId=null;state.guidedScope='filter';state.guidedPageIds=null;document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===b));render();
 };
 function navigateGuided(delta){
  const list=currentGuidedList();if(!list.length)return;
@@ -2134,7 +2248,12 @@ function navigateGuided(delta){
  idx=Math.max(0,Math.min(list.length-1,idx+delta));
  state.guidedItemId=list[idx].id;render();window.scrollTo({top:document.querySelector('#results')?.offsetTop||0,behavior:'smooth'});
 }
-$('guided-review').onclick=()=>{state.guidedReview=!state.guidedReview;if(state.guidedReview&&!state.guidedItemId){const list=currentGuidedList();state.guidedItemId=list[0]?.id||null}render()};
+$('guided-review').onclick=()=>{
+ state.guidedReview=!state.guidedReview;
+ if(state.guidedReview){state.guidedScope='filter';state.guidedPageIds=null;const list=currentGuidedList();if(!state.guidedItemId||!list.some(i=>i.id===state.guidedItemId))state.guidedItemId=list[0]?.id||null}
+ else{state.guidedScope='filter';state.guidedPageIds=null}
+ render();
+};
 $('review-prev').onclick=()=>navigateGuided(-1);
 $('review-next').onclick=()=>navigateGuided(1);
 window.runSingleSecondaryById=async id=>{if(state.running)return;const i=state.items.find(x=>x.id===id);if(!i)return;if(i.classification==='approved'){alert('Unapprove this page before retrying it.');return}const s=snapSecondary();if(!validateSnap(s))return;await runOne(i,s,{forceFresh:true})};
@@ -2144,7 +2263,7 @@ document.addEventListener('keydown',e=>{
  const i=state.items.find(x=>x.id===state.guidedItemId);if(!i)return;
  if(e.key==='ArrowLeft'){e.preventDefault();navigateGuided(-1)}
  else if(e.key==='ArrowRight'){e.preventDefault();navigateGuided(1)}
- else if(e.key==='Escape'){state.guidedReview=false;render()}
+ else if(e.key==='Escape'){state.guidedReview=false;state.guidedScope='filter';state.guidedPageIds=null;render()}
  else if(e.key.toLowerCase()==='a'){e.preventDefault();window.manualClass(i.id,'approved')}
  else if(e.key.toLowerCase()==='r'){e.preventDefault();window.manualClass(i.id,'review')}
  else if(e.key.toLowerCase()==='u'){e.preventDefault();window.manualClass(i.id,'unclear')}
@@ -2517,7 +2636,7 @@ $('pdf-document').onclick=()=>{
  exportPdfPile(organizationScopedItems(),'Photo-to-Text — '+label);
 };
 
-$('clear').onclick=async()=>{if(!confirm('Clear all loaded images and results?'))return;state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});for(const ctrl of state.activeControllers.values())ctrl.abort();state.items=[];state.documents=[];state.documentFilter='all';state.guidedItemId=null;state.regionDraft=null;$('region-modal')?.classList.add('hidden');await clearAutosave();render()};
+$('clear').onclick=async()=>{if(!confirm('Clear all loaded images and results?'))return;state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});for(const ctrl of state.activeControllers.values())ctrl.abort();state.items=[];state.documents=[];state.documentFilter='all';state.guidedItemId=null;state.guidedScope='filter';state.guidedPageIds=null;state.lastBatchSummary=null;state.regionDraft=null;$('region-modal')?.classList.add('hidden');await clearAutosave();render()};
 
 loadSettings();
 restoreProjectState().then(()=>{
