@@ -652,21 +652,34 @@ Build in this order.
 
 ## Release A — Simplified Batch UX
 
-1. Quick Transcribe default
-2. rename/reframe auto-routing as Auto-fix flagged pages
-3. High Assurance Math placeholder/toggle disabled until Phase 5
-4. batch completion dashboard
-5. Resume Interrupted
-6. Retry Failed
-7. Guided Review links from dashboard
+**Status:** Implemented on 2026-09-30.
 
-### Acceptance criteria
+Implemented:
+
+1. Quick Transcribe is the default user-facing batch workflow
+2. automatic routing is reframed as **Auto-fix flagged pages**
+3. a disabled **High Assurance Math** placeholder shows the future higher-assurance path without enabling it prematurely
+4. the large power-user retry/routing surface is collapsed under **Advanced processing, retry & export controls**
+5. completed runs produce a persisted batch summary scoped to the pages in that run
+6. the summary shows Good / Review / Math Unsure / Unclear / Interrupted / Failed and Needs-* counts where present
+7. the summary explicitly states that Good means no warning signals were detected, not independent verification
+8. **Review flagged pages** opens Guided Review on flagged pages from that batch
+9. **Resume Interrupted** reuses the durable queue and preserves each interrupted page's last Primary/Secondary pass where possible
+10. **Retry Failed** skips known same-slot configuration/authentication failures and reports blocked pages
+11. **Export everything** is available directly from the summary
+12. batch-summary state persists through project autosave/Save/Open
+13. browser smoke coverage now asserts that Quick Transcribe makes exactly one semantic provider call when Auto-fix is off
+
+Acceptance criteria:
 
 - one obvious primary Process action
-- Quick Transcribe never makes a semantic second-pass call
+- Quick Transcribe never makes a semantic second-pass call unless Auto-fix is explicitly enabled
 - transient retries still work
-- browser smoke suite covers Quick Transcribe math happy path
-- dashboard counts match actual piles
+- browser smoke suite covers Quick Transcribe and the math happy path
+- dashboard counts are scoped to the completed run's actual page IDs
+- failed retry does not blindly repeat a known same-slot auth/configuration failure
+
+**Next active release:** Release B — Good Spot Checks.
 
 ---
 
