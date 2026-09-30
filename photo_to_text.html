@@ -1401,7 +1401,7 @@ window.manualClass=(id,c)=>{
  pushRevision(i,c==='approved'?'Before approval':'Before manual classification');
  i.classification=c;i.status=c==='failed'?'error':'done';
  i.reason=c==='approved'?'Human reviewed and approved this page.':'Manually assigned to '+c+'.';
- if(c==='approved'){i.error='';i.approvalAt=new Date().toISOString();i.needsReapproval=false;i.autoRoutingNote='Human approved; automatic routing is blocked.'}
+ if(c==='approved'){i.error='';i.approvalAt=new Date().toISOString();i.needsReapproval=false;i.needsRefresh=false;i.preRefreshClassification='';i.preRefreshReason='';i.autoRoutingNote='Human approved; automatic routing is blocked.'}
  else if(c!=='needsreapproval')i.needsReapproval=false;
  i.editingSnapshotTaken=false;scheduleAutosave();render()
 };
@@ -1421,6 +1421,8 @@ window.restorePrevious=id=>{
  i.lastProvider=prev.lastProvider;i.lastModel=prev.lastModel;i.lastPass=prev.lastPass;
  i.truncated=!!prev.truncated;i.stopReason=prev.stopReason||'';
  i.status=i.classification==='failed'?'error':'done';i.error='';i.editingSnapshotTaken=false;i.needsReapproval=i.classification==='needsreapproval';
+ reanchorRegions(i,'',i.finalText);i.needsRefresh=recomputeRegionDependencies(i,i.finalText);
+ if(i.needsRefresh){i.classification='needsrefresh';i.status='done';i.reason='Restored text does not match a preferred targeted-region dependency.'}
  scheduleAutosave();render();
 };
 window.cancelItem=id=>{
@@ -1674,9 +1676,12 @@ async function runOne(i,s,{forceFresh=false}={}){
    if(result.truncated)cl={classification:'review',reason:'Possible truncated response; provider indicated output may have stopped early.'};
    const regionStaleAfterFullPass=recomputeRegionDependencies(i,repaired.text);
    if(regionStaleAfterFullPass)cl={classification:'needsrefresh',reason:'Whole-page retry completed, but a preferred targeted-region result still differs from its linked page text.'};
+   else if(i.needsReapproval||i.preRefreshClassification==='approved')cl={classification:'needsreapproval',reason:'Whole-page retry resolved the targeted dependency, but the previously approved page changed and requires human reapproval.'};
    i.rawText=rawText;i.repairedText=repaired.text;i.finalText=repaired.text;i.text=i.finalText;
    i.repairs=repaired.repairs;i.validationWarnings=validationWarnings;i.validationDetails=validationDetails;i.mathRenderWarnings=[];i.truncated=!!result.truncated;i.stopReason=result.stopReason||'';
-   i.usage=result.usage||null;i.status='done';i.classification=cl.classification;i.needsRefresh=regionStaleAfterFullPass;i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
+   i.usage=result.usage||null;i.status='done';i.classification=cl.classification;i.needsRefresh=regionStaleAfterFullPass;
+   if(!regionStaleAfterFullPass&&cl.classification!=='needsreapproval'){i.preRefreshClassification='';i.preRefreshReason=''}
+   i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
    i.reason=(cached?'Reused exact cached result. ':'')+(repaired.repairs.length?'Auto-repaired '+repaired.repairs.length+' common LaTeX artifact'+(repaired.repairs.length===1?'':'s')+'. ':'')+cl.reason;
    i.error='';i.lastError='';i.lastFailureStatus=0;i.retryNotBefore='';refreshPageNumberSuggestion(i);
    if(!cached&&fingerprint)await cachePut(fingerprint,{schema:PROJECT_SCHEMA,createdAt:new Date().toISOString(),rawText,result:{truncated:!!result.truncated,stopReason:result.stopReason||''},truncated:!!result.truncated,stopReason:result.stopReason||'',usage:result.usage||null,provider:s.provider,model:s.model});
@@ -2198,7 +2203,7 @@ $('pdf-document').onclick=()=>{
  exportPdfPile(organizationScopedItems(),'Photo-to-Text — '+label);
 };
 
-$('clear').onclick=async()=>{if(!confirm('Clear all loaded images and results?'))return;state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});for(const ctrl of state.activeControllers.values())ctrl.abort();state.items=[];state.documents=[];state.documentFilter='all';state.guidedItemId=null;await clearAutosave();render()};
+$('clear').onclick=async()=>{if(!confirm('Clear all loaded images and results?'))return;state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});for(const ctrl of state.activeControllers.values())ctrl.abort();state.items=[];state.documents=[];state.documentFilter='all';state.guidedItemId=null;state.regionDraft=null;$('region-modal')?.classList.add('hidden');await clearAutosave();render()};
 
 loadSettings();
 restoreProjectState().then(()=>{
