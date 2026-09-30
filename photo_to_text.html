@@ -2636,6 +2636,9 @@ async function runA2SelfTests(){
  test('audit manifest contains no API keys',!/apiKey|apikey/i.test(JSON.stringify(auditManifest([]))));
  const zipProbe=buildStoreZip([{name:'test.txt',bytes:utf8Bytes('ok')}]);
  test('ZIP writer returns an archive blob',zipProbe instanceof Blob&&zipProbe.size>20);
+ const compressedProbe=await buildArchiveZip([{name:'repeat.txt',bytes:utf8Bytes('repeat '.repeat(500))}]);
+ test('large archive writer returns a ZIP without full-local concatenation',compressedProbe instanceof Blob&&compressedProbe.size>20);
+ test('large archive writer uses deflate when browser CompressionStream supports raw deflate',typeof CompressionStream!=='function'||Number(compressedProbe._compressedEntries||0)>=1);
  const queueBefore=state.queuePlan;
  state.queuePlan={id:'region-q',kind:'region',jobs:[{id:'p',regionId:'r',kind:'region',pass:'secondary',state:'running'}]};
  const serializedRegionQueue=projectEnvelope(false).queue;
@@ -2699,6 +2702,7 @@ async function runDoctor(){
    ['Automatic routing',autoRoutingEnabled()?'Enabled, max '+autoMaxAttempts()+', '+autoCachePolicy():'Disabled'],
    ['High Assurance',highAssuranceEnabled()?'Enabled · '+highAssurancePolicyLabel()+' · Secondary verifier'+((p.provider===s.provider&&p.model===s.model)?' (same provider/model, independent call)':''):'Disabled'],
    ['High Assurance results',(()=>{const checks=state.items.flatMap(i=>i.highAssuranceChecks||[]);return checks.filter(x=>x.outcome==='verified').length+' verified / '+checks.filter(x=>x.outcome==='review').length+' review / '+checks.filter(x=>x.outcome==='failed').length+' failed'})()],
+   ['Archive compression',typeof CompressionStream==='function'?'Per-entry deflate enabled when it reduces size':'Store-only compatibility fallback'],
    ['Durable queue',state.queuePlan?(state.queuePaused?'Paused / resumable':'Active'):'Idle'],
    ['Cached results',String(cacheCount)],
    ['Interrupted jobs',String(interrupted)],
@@ -2854,6 +2858,30 @@ function buildStoreZip(entries){
  }
  const centralBlob=concatBytes(centrals),end=concatBytes([u32(0x06054b50),u16(0),u16(0),u16(entries.length),u16(entries.length),u32(centralBlob.length),u32(offset),u16(0)]);
  return new Blob([...locals,centralBlob,end],{type:'application/zip'});
+}
+async function deflateRawBytes(data){
+ if(typeof CompressionStream!=='function'||data.length<256)return null;
+ try{
+   const stream=new Blob([data]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+   const compressed=new Uint8Array(await new Response(stream).arrayBuffer());
+   return compressed.length<data.length?compressed:null;
+ }catch(e){return null}
+}
+async function buildArchiveZip(entries){
+ const parts=[],centrals=[];let offset=0,compressedEntries=0;
+ for(const entry of entries){
+   const name=utf8Bytes(entry.name.replace(/^\/+/,'')),data=entry.bytes instanceof Uint8Array?entry.bytes:utf8Bytes(entry.bytes),crc=crc32(data),dt=dosDateTime(entry.date||new Date());
+   const deflated=await deflateRawBytes(data),payload=deflated||data,method=deflated?8:0;
+   if(deflated)compressedEntries++;
+   const localHeader=concatBytes([u32(0x04034b50),u16(20),u16(0x0800),u16(method),u16(dt.time),u16(dt.day),u32(crc),u32(payload.length),u32(data.length),u16(name.length),u16(0),name]);
+   parts.push(localHeader,payload);
+   const central=concatBytes([u32(0x02014b50),u16(20),u16(20),u16(0x0800),u16(method),u16(dt.time),u16(dt.day),u32(crc),u32(payload.length),u32(data.length),u16(name.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset),name]);
+   centrals.push(central);offset+=localHeader.length+payload.length;
+ }
+ const centralBlob=concatBytes(centrals),end=concatBytes([u32(0x06054b50),u16(0),u16(0),u16(entries.length),u16(entries.length),u32(centralBlob.length),u32(offset),u16(0)]);
+ const blob=new Blob([...parts,centralBlob,end],{type:'application/zip'});
+ blob._compressedEntries=compressedEntries;
+ return blob;
 }
 function safeFilePart(s,fallback='item'){return String(s||fallback).replace(/[\\/:*?"<>|\x00-\x1f]+/g,'-').replace(/\s+/g,' ').trim().slice(0,100)||fallback}
 async function itemImageData(i){
@@ -3140,7 +3168,7 @@ async function exportExternalReviewPackages(pageIds=null){
      pkg.looseImageCount=await downloadExternalReviewLoose(pkg,group,n+1,chunks.length);
    }else{
      const entries=await buildExternalReviewPackageEntries(pkg,group);
-     downloadBlob('external-ai-review-'+String(n+1).padStart(2,'0')+'-of-'+String(chunks.length).padStart(2,'0')+'.zip',buildStoreZip(entries));
+     downloadBlob('external-ai-review-'+String(n+1).padStart(2,'0')+'-of-'+String(chunks.length).padStart(2,'0')+'.zip',await buildArchiveZip(entries));
    }
    exported.push(pkg);
    if(n<chunks.length-1)await new Promise(resolve=>setTimeout(resolve,180));
@@ -3377,13 +3405,13 @@ async function exportProjectArchive(){
  if(state.running||state.activeControllers.size){alert('Finish active AI requests before building an archive.');return}
  await saveProjectState();
  const entries=await archiveEntriesForPages(state.items,{includeProject:true});
- downloadBlob('math-photo-notes-archive-'+new Date().toISOString().slice(0,10)+'.zip',buildStoreZip(entries));
+ downloadBlob('math-photo-notes-archive-'+new Date().toISOString().slice(0,10)+'.zip',await buildArchiveZip(entries));
 }
 window.exportPageReviewPackage=async id=>{
  const page=state.items.find(x=>x.id===id);if(!page)return;
  const entries=await archiveEntriesForPages([page],{includeProject:false});
  entries.push({name:'review-instructions.txt',bytes:utf8Bytes('Review this page against the included original image, final transcription, revision history, flags, and targeted-region evidence. No API keys are included.\n')});
- downloadBlob('page-review-'+slug(page.metadata?.title||page.name)+'.zip',buildStoreZip(entries));
+ downloadBlob('page-review-'+slug(page.metadata?.title||page.name)+'.zip',await buildArchiveZip(entries));
 };
 window.exportRegionReviewPackage=async(pageId,regionId)=>{
  const page=state.items.find(x=>x.id===pageId),region=page?.regions?.find(x=>x.id===regionId);if(!page||!region)return;
@@ -3394,7 +3422,7 @@ window.exportRegionReviewPackage=async(pageId,regionId)=>{
  if(region.cropDataUrl){const d=dataUrlBytes(region.cropDataUrl);entries.push({name:'crop'+imageExtensionFromDataUrl(region.cropDataUrl,'crop.jpg'),bytes:d.bytes})}
  for(let q=0;q<(region.results||[]).length;q++){const res=region.results[q];entries.push({name:'results/'+String(q+1).padStart(3,'0')+'-'+safeFilePart(res.pass+'-'+res.model)+'.json',bytes:jsonBytes(res)})}
  entries.push({name:'review-instructions.txt',bytes:utf8Bytes('Compare the included crop and candidate targeted transcriptions. Model disagreement is evidence for human review; this package does not designate an automatic winner.\n')});
- downloadBlob('region-review-'+slug(page.name)+'-'+slug(region.note||region.id)+'.zip',buildStoreZip(entries));
+ downloadBlob('region-review-'+slug(page.name)+'-'+slug(region.note||region.id)+'.zip',await buildArchiveZip(entries));
 };
 $('archive-project').onclick=()=>exportProjectArchive();
 $('external-review-export').onclick=()=>exportExternalReviewPackages(null);
