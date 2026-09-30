@@ -109,7 +109,18 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
 
   <div class="toolbar">
     <button class="primary" id="run">Process batch</button>
+    <span class="small" style="align-self:center;font-weight:700">Simultaneous requests:</span>
+    <select id="concurrency" style="width:auto">
+      <option value="1">1</option>
+      <option value="2" selected>2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+      <option value="5">5</option>
+      <option value="6">6</option>
+    </select>
+    <button id="pause-queue">Pause queue</button>
     <button id="cancel-batch">Cancel batch</button>
+    <span id="queue-status" class="small" style="align-self:center;font-weight:700">Queue idle</span>
     <button id="doctor">Doctor / Diagnostics</button>
     <button id="guided-review">Guided Review</button>
     <div class="review-nav">
@@ -211,7 +222,7 @@ Rules:
 - Example:
   [MATH_UNSURE: seen="x ? 4" guess="$x+4$" note="operator could be + or -"] (I think it says: $x+4$)`
 
-const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarning:'',cancelRequested:false,activeControllers:new Map(),previewTimers:new Map(),guidedReview:false,guidedItemId:null};
+const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarning:'',cancelRequested:false,activeControllers:new Map(),previewTimers:new Map(),guidedReview:false,guidedItemId:null,queuePlan:null,queueRuntimeSnap:null,queuePaused:false,queuePumpScheduled:false};
 const AUTOSAVE_KEY='math_photo_to_notes_phase_a_v1';
 const PROJECT_SCHEMA='math-photo-notes-project-v1';
 const DB_NAME='math-photo-to-notes';
@@ -219,6 +230,8 @@ const DB_VERSION=1;
 const DB_PROJECTS='projects';
 const DB_CACHE='cache';
 const REQUEST_TIMEOUT_MS=90000;
+const MAX_TRANSIENT_RETRIES=3;
+const BASE_RETRY_DELAY_MS=2000;
 const PROVIDER_CAPABILITIES={
  openai:{vision:true,truncation:true,usage:true,cancel:true,notes:'Responses API; image input supported when model supports vision.'},
  anthropic:{vision:true,truncation:true,usage:true,cancel:true,notes:'Messages API; browser-direct use depends on provider policy/CORS.'},
@@ -293,6 +306,11 @@ function projectEnvelope(includeImages=true){
    version:1,
    savedAt:new Date().toISOString(),
    filter:state.filter,
+   queue:state.queuePlan?{
+     ...state.queuePlan,
+     paused:state.queuePaused,
+     jobs:(state.queuePlan.jobs||[]).map(j=>({...j,state:j.state==='running'?'pending':j.state}))
+   }:null,
    items:state.items.map(i=>serializableItem(i,includeImages))
  };
 }
@@ -331,6 +349,13 @@ function dataUrlToFile(dataUrl,name){
 }
 function hydrateSavedItems(saved){
  state.filter=saved.filter||'all';
+ state.queuePlan=saved.queue&&Array.isArray(saved.queue.jobs)?{
+   ...saved.queue,
+   jobs:saved.queue.jobs.map(j=>({...j,state:j.state==='done'?'done':'pending'}))
+ }:null;
+ state.queuePaused=!!state.queuePlan;
+ state.running=false;
+ state.queueRuntimeSnap=null;
  state.items=saved.items.map((x,idx)=>{
    const file=x.imageData?dataUrlToFile(x.imageData,x.name):null;
    const interrupted=x.status==='running'||x.status==='interrupted'||x.classification==='interrupted';
@@ -354,6 +379,9 @@ function hydrateSavedItems(saved){
      imageFit:x.imageFit||'page',
      approvalAt:x.approvalAt||'',
      needsReapproval:!!x.needsReapproval,
+     transientRetries:Number(x.transientRetries||0),
+     transientErrors:Array.isArray(x.transientErrors)?x.transientErrors:[],
+     retryNotBefore:x.retryNotBefore||'',
      primaryAttempts:Number(x.primaryAttempts||0),
      secondaryAttempts:Number(x.secondaryAttempts||0),
      failures:Number(x.failures||0),
@@ -419,6 +447,7 @@ function saveSettings(){
  localStorage.setItem('sorted_ocr_prompt_v3',els.prompt.value);
  const mapIds=['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai'];
  for(const id of mapIds){const el=$(id); if(el) localStorage.setItem('sorted_ocr_'+id,el.value);}
+ const concurrency=$('concurrency');if(concurrency)localStorage.setItem('sorted_ocr_concurrency',concurrency.value);
 }
 function loadSettings(){
  const p=localStorage.getItem('sorted_ocr_provider')||'openai';
@@ -433,6 +462,7 @@ function loadSettings(){
  for(const id of ['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai']){
    const el=$(id); if(el) el.value=localStorage.getItem('sorted_ocr_'+id)||(id==='current-ai'?'primary':'secondary');
  }
+ const concurrency=$('concurrency');if(concurrency)concurrency.value=localStorage.getItem('sorted_ocr_concurrency')||'2';
  syncProvider(1,false);
  syncProvider(2,false);
 }
@@ -449,7 +479,7 @@ function syncProvider(which=1,reset=true){
 els.provider.addEventListener('change',()=>syncProvider(1,true));
 els.provider2.addEventListener('change',()=>syncProvider(2,true));
 [els.model,els.baseurl,els.model2,els.baseurl2,els.prompt].forEach(x=>x.addEventListener('change',saveSettings));
-['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',saveSettings)});
+['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai','concurrency'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',saveSettings)});
 
 async function addFiles(list){
  const files=[...list].filter(f=>f.type.startsWith('image/'));
@@ -464,7 +494,8 @@ async function addFiles(list){
      text:'',rawText:'',repairedText:'',finalText:'',error:'',repairs:[],validationWarnings:[],validationDetails:[],mathRenderWarnings:[],history:[],reviewFlags:[],
      primaryAttempts:0,secondaryAttempts:0,failures:0,lastError:'',truncated:false,stopReason:'',
      viewMode:'final',compareOpen:false,editingSnapshotTaken:false,imageHash:'',lastFingerprint:'',lastAttemptId:'',
-     imageRotation:0,imageZoom:1,imageFit:'page',approvalAt:'',needsReapproval:false
+     imageRotation:0,imageZoom:1,imageFit:'page',approvalAt:'',needsReapproval:false,
+     transientRetries:0,transientErrors:[],retryNotBefore:''
    });
    try{state.items[state.items.length-1].imageHash=await imageHashForFile(f)}catch(e){}
 
@@ -736,8 +767,24 @@ function reanchorReviewFlags(i,oldText,newText){
    }else flag.detached=true;
  }
 }
+function renderQueueStatus(){
+ const status=$('queue-status'),pause=$('pause-queue'),concurrency=$('concurrency');
+ if(concurrency)concurrency.disabled=!!state.running;
+ if(pause){
+   pause.textContent=state.queuePaused?'Resume queue':'Pause queue';
+   pause.disabled=!state.queuePlan;
+ }
+ if(!status)return;
+ if(!state.queuePlan){status.textContent='Queue idle';return}
+ const jobs=state.queuePlan.jobs||[];
+ const done=jobs.filter(j=>j.state==='done').length;
+ const running=jobs.filter(j=>j.state==='running').length;
+ const pending=jobs.filter(j=>j.state==='pending').length;
+ status.textContent=(state.queuePaused?'Paused':'Queue')+': '+done+'/'+jobs.length+' done · '+running+' running · '+pending+' pending';
+}
 function render(){
  renderStats();
+ renderQueueStatus();
  const allList=visibleItems();
  syncGuidedItem(allList);
  let list=allList;
@@ -757,7 +804,7 @@ function render(){
    return `
  <section class="panel card">
   <aside class="side">
-   <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}<div class="small">Attempts: Primary ${i.primaryAttempts||0} · Secondary ${i.secondaryAttempts||0} · Failures ${i.failures||0}</div>${i.imageHash?`<div class="small">Image hash: ${esc(i.imageHash.slice(0,12))}…</div>`:''}</div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
+   <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}<div class="small">Attempts: Primary ${i.primaryAttempts||0} · Secondary ${i.secondaryAttempts||0} · Failures ${i.failures||0} · Transient retries ${i.transientRetries||0}</div>${i.imageHash?`<div class="small">Image hash: ${esc(i.imageHash.slice(0,12))}…</div>`:''}</div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
    ${i.url?`<div class="image-stage"><img id="image-${i.id}" class="preview" src="${i.url}" alt="${esc(i.name)}" style="transform:rotate(${Number(i.imageRotation||0)}deg) scale(${Number(i.imageZoom||1)});${i.imageFit==='width'?'width:100%;max-width:none;':'max-width:100%;max-height:68vh;'}"></div>
    <div class="image-tools">
     <button onclick="zoomImage('${i.id}',-0.15)">Zoom −</button>
