@@ -20,7 +20,7 @@ The repository owner has explicitly permitted reuse of code and patterns from th
 
 # Current Status
 
-As of 2026-09-30, the project has completed the roadmap through **Upgrade 8**.
+As of 2026-09-30, the project has completed the roadmap through **Upgrade 9**.
 
 Implemented:
 
@@ -38,19 +38,23 @@ Implemented:
 - opt-in automatic Primary/Secondary routing
 - bounded routing attempts and loop prevention
 - routing history and queue-safe mixed-AI jobs
+- targeted equation/region crop retries
+- Primary/Secondary crop comparison
+- region-level provenance and dependency tracking
+- Needs Refresh workflow for stale downstream page text
 
 The next active milestone is:
 
-## Upgrade 9 — Targeted Region / Equation Review
+## Upgrade 10 — Export / Archive / Review Packages
 
 Planned next:
 
-- equation/region-only retries
-- model-disagreement review
-- region-level provenance
-- dependency tracking
-- Needs Refresh when targeted re-analysis changes downstream text
-- preserve whole-page retry as a manual fallback
+- versioned project export/import
+- ZIP/archive packaging
+- portable per-page/per-region review packages
+- LaTeX/plain-text export expansion
+- usage/cost reporting
+- provenance/audit manifest
 
 ---
 
@@ -85,6 +89,7 @@ The application currently uses:
 - Failed
 - Approved
 - Needs Reapproval
+- Needs Refresh
 
 ## Queued
 
@@ -141,6 +146,19 @@ Approved pages are excluded from automatic/retry processing unless explicitly un
 A page was previously Approved but its final transcription changed, or review state was added afterward.
 
 It must not silently remain Approved.
+
+## Needs Refresh
+
+A targeted region result has been explicitly selected as preferred, but the linked final transcription does not yet reflect that result.
+
+Needs Refresh means:
+
+- targeted evidence changed
+- downstream page text remains stale
+- the page text has not been overwritten automatically
+- a human must either apply the preferred targeted result or explicitly keep the current page text
+
+Approved pages entering Needs Refresh retain invalidated-approval lineage and require reapproval after the dependency is resolved.
 
 ---
 
@@ -302,6 +320,140 @@ Events include:
 Reasons include maximum-attempt stop, repeated-route prevention, approval protection, and configuration limits.
 
 Automatic routing never performs human approval.
+
+---
+
+# Targeted Region / Equation Review
+
+Upgrade 9 added targeted crop reprocessing.
+
+## Creating a targeted region
+
+Use **Target region** from a page image.
+
+The crop picker uses the original unrotated source image.
+
+A region stores normalized crop coordinates:
+
+- x
+- y
+- width
+- height
+
+and a crop hash when Web Crypto is available.
+
+If the reviewer selects final-transcription text before opening the crop picker, the new region is linked to that text range as a downstream dependency.
+
+A region may also be created without a text link; in that case it serves as review evidence only.
+
+## Region retries
+
+Each saved region can run:
+
+- Primary targeted retry
+- Secondary targeted retry
+- Primary + Secondary comparison
+
+Targeted retries use the same provider adapters, request timeout, cancellation, and transient retry/backoff behavior as whole-page transcription.
+
+They do not increment whole-page Primary/Secondary attempt counters.
+
+Targeted work currently requires the whole-page batch queue to be idle.
+
+Completed targeted results persist with the project; an in-flight crop request itself is not currently a durable queue job.
+
+## Targeted prompt
+
+The targeted prompt instructs the model to transcribe only the crop and to preserve the project's uncertainty protocol.
+
+It does not ask the model to rewrite the full page.
+
+## Region result provenance
+
+Each targeted result records, where available:
+
+- Primary/Secondary pass
+- provider
+- model
+- timestamp
+- raw targeted text
+- mechanically repaired targeted text
+- repair log
+- validation warnings
+- truncation/stop reason
+- usage metadata
+- crop hash
+- hash of the page final text at request time
+
+Each region also keeps an event history for:
+
+- created
+- completed
+- transient retry
+- failed/cancelled
+- disagreement
+- preferred selection
+- applied
+- kept-current
+
+## Primary / Secondary comparison
+
+The latest Primary and Secondary results for a region are compared conservatively after whitespace normalization.
+
+If they differ:
+
+- mark **Model disagreement**
+- route the page toward Review where appropriate
+- do not automatically choose either answer
+
+If the page was already Approved, newly discovered model disagreement requires human reapproval.
+
+## Preferred targeted result
+
+A reviewer may explicitly mark any targeted result as preferred.
+
+Selecting a preferred result never edits final page text automatically.
+
+If the region is linked to final text and the preferred targeted result differs from that linked text:
+
+- region becomes stale
+- page becomes **Needs Refresh**
+
+## Resolving Needs Refresh
+
+Two explicit actions are available:
+
+### Apply preferred to final text
+
+- preserve the previous page revision
+- replace only the linked text span
+- keep the region provenance
+- re-run deterministic LaTeX validation/classification
+- require reapproval when the page had previously been Approved
+
+### Keep current final text
+
+- retain the existing page text
+- record that the human rejected the preferred targeted replacement for the downstream page
+- resolve that region dependency without silently rewriting text
+
+## Dependency tracking
+
+Region text links are stored as anchored character ranges plus the selected text.
+
+When page text changes:
+
+- attempt to re-anchor by exact selected-text matching near the old location
+- if the anchor cannot be found, mark it detached
+- a detached preferred dependency remains Needs Refresh until resolved/recreated
+
+Whole-page retries remain available as a manual fallback.
+
+A whole-page retry does not delete targeted-region history.
+
+If a whole-page result still disagrees with a preferred targeted dependency, the page remains Needs Refresh.
+
+If it resolves the dependency for a previously Approved page, Needs Reapproval remains required.
 
 ---
 
@@ -711,6 +863,8 @@ It currently checks/reports:
 - transient retry limit
 - durable queue state
 - automatic routing enabled/disabled state, max attempts, and cache policy
+- targeted region count
+- Needs Refresh page count
 - cached result count
 - interrupted job count
 - A2 self-tests
@@ -746,6 +900,12 @@ Diagnostics should remain action-oriented.
 20. automatic routing touching Approved or Needs Reapproval pages.
 21. missing Secondary credentials turning an automatic route into a Failed transcription instead of pausing the queue.
 22. disabling automatic routing leaving pending auto-route jobs silently active.
+23. targeted crop AI silently replacing full-page transcription.
+24. Primary/Secondary targeted disagreement auto-selecting a winner.
+25. preferred region results changing page text before explicit human apply.
+26. deleting/reanchoring a region silently losing a stale dependency.
+27. Approved pages resolving targeted dependencies without preserving reapproval requirements.
+28. automatic whole-page routing operating on Needs Refresh pages.
 
 ---
 
@@ -825,10 +985,22 @@ Diagnostics should remain action-oriented.
 - pending-auto-route cancellation when automation is disabled
 - Approved / Needs Reapproval protection
 
-## Next
+### Upgrade 9 — Targeted Region / Equation Review
+- visual crop picker over the original unrotated image
+- optional link to selected final-transcription text
+- targeted Primary retry
+- targeted Secondary retry
+- Primary/Secondary comparison
+- model-disagreement detection without automatic winner selection
+- region crop hash and result provenance
+- anchored dependency tracking/re-anchoring
+- explicit preferred-result selection
+- Needs Refresh state
+- explicit Apply preferred / Keep current resolution
+- previously Approved pages preserve reapproval lineage
+- whole-page retry remains available
 
-### Upgrade 9
-Equation/region-only retries, model-disagreement review, dependency tracking, Needs Refresh.
+## Next
 
 ### Upgrade 10
 Full project/archive export, portable review packages, cost/usage reporting.
