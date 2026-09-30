@@ -38,9 +38,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
 @media(max-width:1050px){.editorgrid{grid-template-columns:1fr}}
 @media(max-width:900px){.top,.card{grid-template-columns:1fr}.side{border-right:0;border-bottom:1px solid var(--line)}.stats{grid-template-columns:repeat(2,1fr)}}
 </style>
-<script>
-window.MathJax={
-  tex:{inlineMath:[['\\(','\\)'],['
+</head>
 <body>
 <div class="app">
 <section class="panel">
@@ -745,12 +743,32 @@ function render(){
  }).join('');
  for(const i of list)queueMathPreview(i.id,versionText(i,i.viewMode||'final'),0);
 }
+let mathJaxLoadPromise=null;
+function ensureMathJax(){
+ if(window.MathJax?.typesetPromise)return Promise.resolve(window.MathJax);
+ if(mathJaxLoadPromise)return mathJaxLoadPromise;
+ const dollar=String.fromCharCode(36);
+ window.MathJax={
+   tex:{inlineMath:[['\\(','\\)'],[dollar,dollar]],displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true},
+   options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
+ };
+ mathJaxLoadPromise=new Promise((resolve,reject)=>{
+   const node=document.createElement('script');
+   node.src='https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js';
+   node.async=true;
+   node.onload=()=>resolve(window.MathJax);
+   node.onerror=()=>reject(new Error('MathJax could not be loaded.'));
+   document.head.appendChild(node);
+ });
+ return mathJaxLoadPromise;
+}
 async function renderMathPreview(id,text){
  const el=$('preview-'+id);if(!el)return;
  el.classList.remove('render-error');
  el.textContent=String(text??'');
- if(!window.MathJax?.typesetPromise)return;
  try{
+   await ensureMathJax();
+   if(!window.MathJax?.typesetPromise)return;
    if(window.MathJax.typesetClear)window.MathJax.typesetClear([el]);
    await window.MathJax.typesetPromise([el]);
    const i=state.items.find(x=>x.id===id);
