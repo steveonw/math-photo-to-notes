@@ -150,6 +150,74 @@ try{
     await context.close();
   }
 
+  // Release B: Good-page spot checks persist human evidence and provenance.
+  {
+    anthropicResponse=mathResponse;
+    anthropicCalls=0;
+    const {context,page}=await newPage();
+    await addFixture(page,'spotcheck-ok.png');
+    const item=await processOne(page);
+    assert(item.badge==='Good','Spot-check fixture must begin in Good');
+
+    await page.click('#summary-spotcheck-good');
+    await page.waitForFunction(()=>!document.getElementById('spotcheck-panel').classList.contains('hidden'),null,{timeout:5000});
+    const panelText=await page.locator('#spotcheck-panel').innerText();
+    assert(/Good-page spot-check/i.test(panelText),'Spot-check review panel did not open');
+    await page.click('#spotcheck-ok');
+
+    const evidence=await page.evaluate(()=>{
+      const rec=state.spotCheckLedger[0];
+      const payload=projectEnvelope(false);
+      state.spotCheckLedger=[];
+      state.spotCheckSession=null;
+      hydrateSavedItems(payload);
+      return {
+        ledgerLength:state.spotCheckLedger.length,
+        rec:state.spotCheckLedger[0],
+        original:rec,
+        reliabilityText:document.getElementById('reliability-summary')?.innerText||''
+      };
+    });
+    assert(evidence.ledgerLength===1,'Spot-check ledger did not survive project hydration');
+    assert(evidence.rec.outcome==='ok','OK spot-check outcome was not preserved');
+    assert(evidence.rec.model==='claude-smoke-test','Spot-check model provenance missing');
+    assert(evidence.rec.promptFingerprint&&evidence.rec.promptFingerprint.length===64,'Prompt fingerprint missing from spot-check evidence');
+    assert(evidence.rec.processingFingerprint&&evidence.rec.processingFingerprint.length===64,'Processing fingerprint missing from spot-check evidence');
+    assert(!('accuracy' in evidence.rec),'Spot-check record should not claim an accuracy percentage');
+    await page.evaluate(()=>render());
+    const reliability=await page.locator('#reliability-summary').innerText();
+    assert(/1 human-reviewed Good page/i.test(reliability),'Reliability summary did not show accumulated human count');
+    assert(/not a formal accuracy percentage/i.test(reliability),'Reliability summary overclaimed accuracy');
+    await context.close();
+  }
+
+  // Release B: an error found during a Good-page spot-check becomes Review without changing text.
+  {
+    anthropicResponse=mathResponse;
+    anthropicCalls=0;
+    const {context,page}=await newPage();
+    await addFixture(page,'spotcheck-error.png');
+    const before=await processOne(page);
+    assert(before.badge==='Good','Error spot-check fixture must begin in Good');
+
+    await page.click('#summary-spotcheck-good');
+    await page.selectOption('#spotcheck-error-category','exponent-subscript');
+    await page.fill('#spotcheck-note','Exponent should be checked against the source image.');
+    await page.click('#spotcheck-error');
+
+    const after=await page.evaluate(()=>({
+      classification:state.items[0].classification,
+      finalText:state.items[0].finalText,
+      ledger:state.spotCheckLedger[0]
+    }));
+    assert(after.classification==='review','Human-found Good-page error did not move the page to Review');
+    assert(after.finalText===before.final,'Spot-check error reporting changed transcription text');
+    assert(after.ledger.outcome==='error','Error spot-check was not recorded');
+    assert(after.ledger.errorCategory==='exponent-subscript','Error category was not preserved');
+    assert(/Exponent should be checked/.test(after.ledger.note),'Spot-check note was not preserved');
+    await context.close();
+  }
+
   // Release A: Quick Transcribe must stop after one semantic pass when Auto-fix is off.
   {
     anthropicResponse='Only a few words';
