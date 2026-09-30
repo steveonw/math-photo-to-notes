@@ -39,7 +39,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
 .historybox{margin-top:10px}.historybox summary{cursor:pointer;font-weight:700}.historybox ol{padding-left:20px}.historybox li{margin:6px 0;font-size:12px}
 .editorgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}.previewpane{border:1px solid var(--line);border-radius:12px;padding:12px;min-height:380px;background:#fff;white-space:pre-wrap;overflow-wrap:anywhere}.previewpane.render-error{border-color:#dc2626;background:#fef2f2}.previewtitle{font-size:12px;font-weight:800;margin-bottom:8px}.math-warning-list{display:grid;gap:7px;margin:10px 0}.math-warning{border:1px solid #fed7aa;background:#fff7ed;border-radius:10px;padding:8px 10px;font-size:12px}.math-warning code{display:block;margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere}.math-marker{border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:8px 10px;font-size:12px}
 .review-flags{display:grid;gap:7px;margin:10px 0}.review-flag{border:1px solid #cbd5e1;border-radius:10px;padding:8px 10px;background:#f8fafc;font-size:12px}.review-flag.detached{border-color:#f59e0b;background:#fffbeb}.review-flag code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;margin:5px 0}.review-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.shortcut-help{padding:7px 9px;border-radius:10px;background:#f4f4f5;font-size:11px;color:var(--muted)}
-.orgbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;padding:12px;border:1px solid var(--line);border-radius:14px;background:#fafafa}.orgbar select{width:auto;min-width:180px}.metadata-box{margin-top:10px;border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff}.metadata-box summary{cursor:pointer;font-weight:800;font-size:12px}.metadata-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.metadata-grid label{margin:0}.metadata-grid input{padding:7px 8px;font-size:12px}.drag-handle{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:grab;user-select:none}.card.dragging{opacity:.45}.card.drop-target{outline:3px solid #93c5fd;outline-offset:-3px}.page-suggestion{margin-top:8px;padding:8px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px;font-size:12px}.doc-chip{display:inline-block;padding:3px 7px;border-radius:999px;background:#e0e7ff;color:#3730a3;font-size:10px;font-weight:800;margin-top:5px}
+.orgbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;padding:12px;border:1px solid var(--line);border-radius:14px;background:#fafafa}.orgbar select{width:auto;min-width:180px}.metadata-box{margin-top:10px;border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff}.metadata-box summary{cursor:pointer;font-weight:800;font-size:12px}.metadata-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.metadata-grid label{margin:0}.metadata-grid input{padding:7px 8px;font-size:12px}.drag-handle{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:grab;user-select:none}.card.dragging{opacity:.45}.card.drop-target{outline:3px solid #93c5fd;outline-offset:-3px}.page-suggestion{margin-top:8px;padding:8px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px;font-size:12px}.doc-chip{display:inline-block;padding:3px 7px;border-radius:999px;background:#e0e7ff;color:#3730a3;font-size:10px;font-weight:800;margin-top:5px}.auto-route-box{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:7px 9px;border:1px solid #c7d2fe;background:#eef2ff;border-radius:12px}.auto-route-box input[type="checkbox"]{width:auto}.auto-route-box select{width:auto;min-width:88px}.routing-history{margin:9px 0}.routing-history summary{cursor:pointer;font-weight:800;font-size:12px}.routing-history ol{padding-left:20px;margin:7px 0}.routing-history li{margin:5px 0;font-size:12px}.routing-note{margin:8px 0;padding:8px 10px;border:1px solid #c7d2fe;background:#eef2ff;border-radius:10px;font-size:12px}
 @media(max-width:1050px){.editorgrid,.guided-review .card{grid-template-columns:1fr}}
 @media(max-width:900px){.top,.card{grid-template-columns:1fr}.side{border-right:0;border-bottom:1px solid var(--line)}.stats{grid-template-columns:repeat(2,1fr)}}
 </style>
@@ -122,6 +122,21 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     <button id="pause-queue">Pause queue</button>
     <button id="cancel-batch">Cancel batch</button>
     <span id="queue-status" class="small" style="align-self:center;font-weight:700">Queue idle</span>
+    <div class="auto-route-box">
+      <label style="display:flex;align-items:center;gap:6px;margin:0"><input id="auto-routing" type="checkbox"> Auto-route problem results</label>
+      <span class="small">Max attempts/page:</span>
+      <select id="auto-max-attempts">
+        <option value="2" selected>2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+      </select>
+      <span class="small">Auto retry:</span>
+      <select id="auto-cache-policy">
+        <option value="fresh" selected>Fresh AI call</option>
+        <option value="reuse">Allow exact cache</option>
+      </select>
+      <span id="auto-routing-status" class="small">Off</span>
+    </div>
     <button id="doctor">Doctor / Diagnostics</button>
     <button id="guided-review">Guided Review</button>
     <div class="review-nav">
@@ -238,7 +253,7 @@ Rules:
 - Example:
   [MATH_UNSURE: seen="x ? 4" guess="$x+4$" note="operator could be + or -"] (I think it says: $x+4$)`
 
-const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarning:'',cancelRequested:false,activeControllers:new Map(),previewTimers:new Map(),guidedReview:false,guidedItemId:null,queuePlan:null,queueRuntimeSnap:null,queuePaused:false,queuePumpScheduled:false,documents:[],documentFilter:'all',dragItemId:null};
+const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarning:'',cancelRequested:false,activeControllers:new Map(),previewTimers:new Map(),guidedReview:false,guidedItemId:null,queuePlan:null,queueRuntimeSnap:null,queueRuntimeSnaps:{},queuePaused:false,queuePumpScheduled:false,documents:[],documentFilter:'all',dragItemId:null};
 const AUTOSAVE_KEY='math_photo_to_notes_phase_a_v1';
 const PROJECT_SCHEMA='math-photo-notes-project-v1';
 const DB_NAME='math-photo-to-notes';
@@ -377,6 +392,7 @@ function hydrateSavedItems(saved){
  state.queuePaused=!!state.queuePlan;
  state.running=false;
  state.queueRuntimeSnap=null;
+ state.queueRuntimeSnaps={};
  state.items=saved.items.map((x,idx)=>{
    const file=x.imageData?dataUrlToFile(x.imageData,x.name):null;
    const interrupted=x.status==='running'||x.status==='interrupted'||x.classification==='interrupted';
@@ -416,6 +432,9 @@ function hydrateSavedItems(saved){
      },
      pageNumberSuggestion:x.pageNumberSuggestion||null,
      dismissedPageSuggestion:x.dismissedPageSuggestion||'',
+     routingHistory:Array.isArray(x.routingHistory)?x.routingHistory:[],
+     autoRoutingNote:x.autoRoutingNote||'',
+     lastFailureStatus:Number(x.lastFailureStatus||0),
      primaryAttempts:Number(x.primaryAttempts||0),
      secondaryAttempts:Number(x.secondaryAttempts||0),
      failures:Number(x.failures||0),
@@ -485,6 +504,10 @@ function saveSettings(){
  const mapIds=['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai'];
  for(const id of mapIds){const el=$(id); if(el) localStorage.setItem('sorted_ocr_'+id,el.value);}
  const concurrency=$('concurrency');if(concurrency)localStorage.setItem('sorted_ocr_concurrency',concurrency.value);
+ const auto=$('auto-routing'),max=$('auto-max-attempts'),policy=$('auto-cache-policy');
+ if(auto)localStorage.setItem('sorted_ocr_auto_routing',auto.checked?'1':'0');
+ if(max)localStorage.setItem('sorted_ocr_auto_max_attempts',max.value);
+ if(policy)localStorage.setItem('sorted_ocr_auto_cache_policy',policy.value);
 }
 function loadSettings(){
  const p=localStorage.getItem('sorted_ocr_provider')||'openai';
@@ -500,6 +523,10 @@ function loadSettings(){
    const el=$(id); if(el) el.value=localStorage.getItem('sorted_ocr_'+id)||(id==='current-ai'?'primary':'secondary');
  }
  const concurrency=$('concurrency');if(concurrency)concurrency.value=localStorage.getItem('sorted_ocr_concurrency')||'2';
+ const auto=$('auto-routing'),max=$('auto-max-attempts'),policy=$('auto-cache-policy');
+ if(auto)auto.checked=localStorage.getItem('sorted_ocr_auto_routing')==='1';
+ if(max)max.value=localStorage.getItem('sorted_ocr_auto_max_attempts')||'2';
+ if(policy)policy.value=localStorage.getItem('sorted_ocr_auto_cache_policy')||'fresh';
  syncProvider(1,false);
  syncProvider(2,false);
 }
@@ -516,7 +543,7 @@ function syncProvider(which=1,reset=true){
 els.provider.addEventListener('change',()=>syncProvider(1,true));
 els.provider2.addEventListener('change',()=>syncProvider(2,true));
 [els.model,els.baseurl,els.model2,els.baseurl2,els.prompt].forEach(x=>x.addEventListener('change',saveSettings));
-['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai','concurrency'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',saveSettings)});
+['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai','concurrency','auto-routing','auto-max-attempts','auto-cache-policy'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',()=>{saveSettings();renderQueueStatus()})});
 
 async function addFiles(list){
  const files=[...list].filter(f=>f.type.startsWith('image/'));
@@ -536,7 +563,8 @@ async function addFiles(list){
      documentId:(state.documentFilter!=='all'&&state.documentFilter!=='unfiled')?state.documentFilter:'',
      order:state.items.length,
      metadata:{title:'',className:'',chapter:'',lecture:'',date:'',pageNumber:'',tags:''},
-     pageNumberSuggestion:null,dismissedPageSuggestion:''
+     pageNumberSuggestion:null,dismissedPageSuggestion:'',
+     routingHistory:[],autoRoutingNote:'',lastFailureStatus:0
    });
    try{state.items[state.items.length-1].imageHash=await imageHashForFile(f)}catch(e){}
    refreshPageNumberSuggestion(state.items[state.items.length-1]);
@@ -862,9 +890,14 @@ function reanchorReviewFlags(i,oldText,newText){
 function documentOptionsHTML(selected){
  return '<option value="">Unfiled</option>'+state.documents.map(d=>'<option value="'+esc(d.id)+'"'+(d.id===selected?' selected':'')+'>'+esc(d.name)+'</option>').join('');
 }
+function autoRoutingEnabled(){return !!$('auto-routing')?.checked}
+function autoMaxAttempts(){const n=Number($('auto-max-attempts')?.value||2);return Math.max(2,Math.min(4,Number.isFinite(n)?n:2))}
+function autoCachePolicy(){return $('auto-cache-policy')?.value==='reuse'?'reuse':'fresh'}
+function totalProcessingAttempts(i){return Number(i?.primaryAttempts||0)+Number(i?.secondaryAttempts||0)}
 function renderQueueStatus(){
- const status=$('queue-status'),pause=$('pause-queue'),concurrency=$('concurrency');
+ const status=$('queue-status'),pause=$('pause-queue'),concurrency=$('concurrency'),autoStatus=$('auto-routing-status');
  if(concurrency)concurrency.disabled=!!state.running;
+ if(autoStatus)autoStatus.textContent=autoRoutingEnabled()?'On · max '+autoMaxAttempts()+' · '+(autoCachePolicy()==='fresh'?'fresh calls':'cache allowed'):'Off';
  if(pause){
    pause.textContent=state.queuePaused?'Resume queue':'Pause queue';
    pause.disabled=!state.queuePlan;
@@ -949,6 +982,8 @@ function render(){
     <button class="${mode==='final'?'active':''}" onclick="setViewMode('${i.id}','final')">View final</button>
    </div>
    ${i.reason?`<div class="reason"><b>Sorting reason:</b> ${esc(i.reason)}</div>`:''}
+   ${i.autoRoutingNote?`<div class="routing-note"><b>Automatic routing:</b> ${esc(i.autoRoutingNote)}</div>`:''}
+   ${i.routingHistory&&i.routingHistory.length?`<details class="routing-history"><summary>Routing history (${i.routingHistory.length})</summary><ol>${i.routingHistory.slice().reverse().map(h=>`<li><b>${esc(h.from||'result')} → ${esc(h.pass||'')}</b> · ${esc(h.provider||'')} ${esc(h.model||'')} · ${esc(h.action||'')}<br><span class="small">${esc(h.reason||'')}${h.at?' · '+esc(new Date(h.at).toLocaleString()):''}</span></li>`).join('')}</ol></details>`:''}
    ${i.classification==='needsreapproval'?`<div class="error"><b>Needs Reapproval:</b> this page was previously approved, then its final transcription changed.</div>`:''}
    <div class="toolbar">
     <button onclick="addReviewFlag('${i.id}')">Flag selected text</button>
