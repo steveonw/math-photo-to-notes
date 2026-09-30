@@ -508,6 +508,7 @@ function hydrateSavedItems(saved){
      preRefreshClassification:x.preRefreshClassification||'',
      preRefreshReason:x.preRefreshReason||'',
      lastFailureStatus:Number(x.lastFailureStatus||0),
+     postProcessingError:!!x.postProcessingError,
      usageLog:Array.isArray(x.usageLog)?x.usageLog:[],
      primaryAttempts:Number(x.primaryAttempts||0),
      secondaryAttempts:Number(x.secondaryAttempts||0),
@@ -641,7 +642,7 @@ async function addFiles(list){
      order:state.items.length,
      metadata:{title:'',className:'',chapter:'',lecture:'',date:'',pageNumber:'',tags:''},
      pageNumberSuggestion:null,dismissedPageSuggestion:'',
-     routingHistory:[],autoRoutingNote:'',regions:[],needsRefresh:false,preRefreshClassification:'',preRefreshReason:'',lastFailureStatus:0,usageLog:[]
+     routingHistory:[],autoRoutingNote:'',regions:[],needsRefresh:false,preRefreshClassification:'',preRefreshReason:'',lastFailureStatus:0,postProcessingError:false,usageLog:[]
    });
    try{state.items[state.items.length-1].imageHash=await imageHashForFile(f)}catch(e){}
    refreshPageNumberSuggestion(state.items[state.items.length-1]);
@@ -700,9 +701,9 @@ function repairMathSpan(span,repairs){
  // Avoid converting ordinary prose words such as "sum" or "log".
  const cmds=['dfrac','frac','cdot','sqrt','infty','int','sum','lim','sin','cos','tan','ln','log','theta','alpha','beta','gamma','Delta','partial'];
  for(const cmd of cmds){
-   const re=new RegExp('(^|[^A-Za-z\\\\\\\\])'+cmd+'(?=\\\\s*(?:\\\\{|_|\\\\^|\\\\())','g');
+   const re=new RegExp('(^|[^A-Za-z\\\\])'+cmd+'(?=\\s*(?:\\{|_|\\^|\\())','g');
    const before=s;
-   s=s.replace(re,(m,p1)=>p1+'\\\\'+cmd);
+   s=s.replace(re,(m,p1)=>p1+'\\'+cmd);
    if(s!==before) repairs.push('restored missing \\\\ before '+cmd+' in math');
  }
  return s;
@@ -1204,7 +1205,7 @@ function ensureMathJax(){
  };
  mathJaxLoadPromise=new Promise((resolve,reject)=>{
    const node=document.createElement('script');
-   node.src='https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js';
+   node.src='https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js';
    node.async=true;
    node.onload=()=>resolve(window.MathJax);
    node.onerror=()=>reject(new Error('MathJax could not be loaded.'));
@@ -1429,6 +1430,7 @@ window.toggleCompare=id=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.
 window.editText=(id,v)=>{
  const i=state.items.find(x=>x.id===id); if(!i)return;
  const oldText=i.finalText||i.text||'';
+ i.postProcessingError=false;
  if(!i.editingSnapshotTaken){pushRevision(i,'Before manual edit');i.editingSnapshotTaken=true}
  reanchorReviewFlags(i,oldText,v);
  reanchorRegions(i,oldText,v);
@@ -1550,8 +1552,8 @@ async function transcribe(item,s,signal){
    j=await response.json().catch(()=>null); if(!response.ok)throw providerHttpError(response,j,'Anthropic request failed.'); text=extractAnthropic(j);
    stopReason=j?.stop_reason||''; truncated=stopReason==='max_tokens';usage=j?.usage||null;
  }else if(s.provider==='gemini'){
-   const ep='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(s.model)+':generateContent?key='+encodeURIComponent(s.apiKey);
-   response=await fetch(ep,fetchOpts({contents:[{parts:[{text:s.prompt},{inlineData:{mimeType:mime,data:base}}]}],generationConfig:{temperature:0}},{'Content-Type':'application/json'}));
+   const ep='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(s.model)+':generateContent';
+   response=await fetch(ep,fetchOpts({contents:[{parts:[{text:s.prompt},{inlineData:{mimeType:mime,data:base}}]}],generationConfig:{temperature:0}},{'Content-Type':'application/json','x-goog-api-key':s.apiKey}));
    j=await response.json().catch(()=>null); if(!response.ok)throw providerHttpError(response,j,'Gemini request failed.'); text=extractGemini(j);
    stopReason=j?.candidates?.[0]?.finishReason||''; truncated=/MAX_TOKENS|TOKEN/i.test(stopReason);usage=j?.usageMetadata||null;
  }else{
@@ -1723,28 +1725,43 @@ async function runOne(i,s,{forceFresh=false}={}){
    }
    if(i.activeAttemptId!==attemptId)return {outcome:'stale'};
    const rawText=result.text;
-   const repaired=repairLatexForMathJax(rawText);
-   const previousFinal=i.finalText||i.text||'';
-   reanchorRegions(i,previousFinal,repaired.text);
-   let cl=classifyText(repaired.text);
-   const validationWarnings=latexStructuralWarnings(repaired.text);
-   const validationDetails=latexValidationDetails(repaired.text);
-   if(result.truncated)cl={classification:'review',reason:'Possible truncated response; provider indicated output may have stopped early.'};
-   const regionStaleAfterFullPass=recomputeRegionDependencies(i,repaired.text);
-   if(regionStaleAfterFullPass)cl={classification:'needsrefresh',reason:'Whole-page retry completed, but a preferred targeted-region result still differs from its linked page text.'};
-   else if(i.needsReapproval||i.preRefreshClassification==='approved')cl={classification:'needsreapproval',reason:'Whole-page retry resolved the targeted dependency, but the previously approved page changed and requires human reapproval.'};
-   i.rawText=rawText;i.repairedText=repaired.text;i.finalText=repaired.text;i.text=i.finalText;
-   i.repairs=repaired.repairs;i.validationWarnings=validationWarnings;i.validationDetails=validationDetails;i.mathRenderWarnings=[];i.truncated=!!result.truncated;i.stopReason=result.stopReason||'';
-   i.usage=result.usage||null;i.usageLog=i.usageLog||[];
+   // A successful provider response is valuable even if local repair/validation later crashes.
+   // Persist it first so a post-processing bug never destroys a paid transcription.
+   i.rawText=rawText;i.truncated=!!result.truncated;i.stopReason=result.stopReason||'';i.usage=result.usage||null;
+   i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';i.lastFailureStatus=0;i.postProcessingError=false;
+   i.usageLog=i.usageLog||[];
    i.usageLog.push({at:new Date().toISOString(),scope:'page',pass:s.pass||'primary',provider:s.provider,model:s.model,usage:result.usage||null,cached:!!cached});
    if(i.usageLog.length>100)i.usageLog.shift();
-   i.status='done';i.classification=cl.classification;i.needsRefresh=regionStaleAfterFullPass;
-   if(!regionStaleAfterFullPass&&cl.classification!=='needsreapproval'){i.preRefreshClassification='';i.preRefreshReason=''}
-   i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
-   i.reason=(cached?'Reused exact cached result. ':'')+(repaired.repairs.length?'Auto-repaired '+repaired.repairs.length+' common LaTeX artifact'+(repaired.repairs.length===1?'':'s')+'. ':'')+cl.reason;
-   i.error='';i.lastError='';i.lastFailureStatus=0;i.retryNotBefore='';refreshPageNumberSuggestion(i);
    if(!cached&&fingerprint)await cachePut(fingerprint,{schema:PROJECT_SCHEMA,createdAt:new Date().toISOString(),rawText,result:{truncated:!!result.truncated,stopReason:result.stopReason||''},truncated:!!result.truncated,stopReason:result.stopReason||'',usage:result.usage||null,provider:s.provider,model:s.model});
-   return {outcome:'done',classification:i.classification,cached};
+   scheduleAutosave();
+
+   try{
+     const repaired=repairLatexForMathJax(rawText);
+     const previousFinal=i.finalText||i.text||'';
+     reanchorRegions(i,previousFinal,repaired.text);
+     let cl=classifyText(repaired.text);
+     const validationWarnings=latexStructuralWarnings(repaired.text);
+     const validationDetails=latexValidationDetails(repaired.text);
+     if(result.truncated)cl={classification:'review',reason:'Possible truncated response; provider indicated output may have stopped early.'};
+     const regionStaleAfterFullPass=recomputeRegionDependencies(i,repaired.text);
+     if(regionStaleAfterFullPass)cl={classification:'needsrefresh',reason:'Whole-page retry completed, but a preferred targeted-region result still differs from its linked page text.'};
+     else if(i.needsReapproval||i.preRefreshClassification==='approved')cl={classification:'needsreapproval',reason:'Whole-page retry resolved the targeted dependency, but the previously approved page changed and requires human reapproval.'};
+     i.repairedText=repaired.text;i.finalText=repaired.text;i.text=i.finalText;
+     i.repairs=repaired.repairs;i.validationWarnings=validationWarnings;i.validationDetails=validationDetails;i.mathRenderWarnings=[];
+     i.status='done';i.classification=cl.classification;i.needsRefresh=regionStaleAfterFullPass;
+     if(!regionStaleAfterFullPass&&cl.classification!=='needsreapproval'){i.preRefreshClassification='';i.preRefreshReason=''}
+     i.reason=(cached?'Reused exact cached result. ':'')+(repaired.repairs.length?'Auto-repaired '+repaired.repairs.length+' common LaTeX artifact'+(repaired.repairs.length===1?'':'s')+'. ':'')+cl.reason;
+     i.error='';i.lastError='';i.retryNotBefore='';refreshPageNumberSuggestion(i);
+     return {outcome:'done',classification:i.classification,cached};
+   }catch(postError){
+     i.postProcessingError=true;
+     i.repairedText='';i.finalText=rawText;i.text=rawText;i.repairs=[];i.validationWarnings=[];i.validationDetails=[];i.mathRenderWarnings=[];
+     i.status='done';i.classification='review';i.needsRefresh=false;
+     i.reason='Provider transcription succeeded, but local post-processing failed. Raw AI output was preserved for review.';
+     i.error='Post-processing error: '+(postError instanceof Error?postError.message:String(postError));
+     i.lastError=i.error;i.retryNotBefore='';refreshPageNumberSuggestion(i);
+     return {outcome:'review',classification:'review',cached,postProcessingError:true};
+   }
  }catch(e){
    if(i.activeAttemptId!==attemptId)return {outcome:'stale'};
    if(masterController.signal.aborted||e?.name==='AbortError'){
@@ -1828,6 +1845,7 @@ function eligibleAutomaticFailure(i,nextPass,previousPass){
 }
 function autoRouteGuardReason(i,classification,nextPass,previousPass,maxAttempts){
  if(!i)return 'Item no longer exists.';
+ if(i.postProcessingError)return 'Local post-processing failed; raw AI output is already preserved, so automatic AI rerouting is blocked.';
  if(i.classification==='approved'||i.needsReapproval||i.classification==='needsreapproval'||i.needsRefresh||i.classification==='needsrefresh')return 'Human approval or targeted-refresh state is protected from automatic routing.';
  if(!['review','unclear','mathunsure','failed'].includes(classification))return 'Classification does not require automatic routing.';
  if(totalProcessingAttempts(i)>=maxAttempts)return 'Maximum '+maxAttempts+' processing attempts reached.';
@@ -1964,6 +1982,12 @@ async function runA2SelfTests(){
  const test=(name,ok)=>tests.push({name,ok:!!ok});
  const radical=repairLatexForMathJax('$√x$');
  test('radical scope is never silently rewritten',radical.text==='$√x$');
+ test('ordinary exponent math survives repair',repairLatexForMathJax('$x^2$').text==='$x^2$');
+ test('ordinary inline math survives repair',repairLatexForMathJax('$2x$').text==='$2x$');
+ test('missing frac backslash repairs to one LaTeX backslash',repairLatexForMathJax('$frac{1}{2}$').text==='$\\frac{1}{2}$');
+ test('missing sqrt backslash repairs safely when braced',repairLatexForMathJax('$sqrt{x}$').text==='$\\sqrt{x}$');
+ test('missing theta backslash repairs before subscript',repairLatexForMathJax('$theta_1$').text==='$\\theta_1$');
+ test('missing sin backslash repairs before parenthesis',repairLatexForMathJax('$sin(x)$').text==='$\\sin(x)$');
  test('MATH_UNSURE routes to Math Unsure',classifyText('[MATH_UNSURE: seen="?" guess="$x$" note="test"] (I think it says: $x$)').classification==='mathunsure');
  test('explicit unclear routes to Unclear',classifyText('word [unclear] word word word word').classification==='unclear');
  test('unbalanced math delimiter is detected',latexStructuralWarnings('\\(x+1').length>0);
@@ -2411,7 +2435,7 @@ function exportPdfPile(list,title){
    options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
  };
  <\/script>
- <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"><\/script>
+ <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js"><\/script>
  <style>
   @page{size:auto;margin:0.6in}
   body{font-family:Georgia,'Times New Roman',serif;color:#111;line-height:1.5;margin:0}
