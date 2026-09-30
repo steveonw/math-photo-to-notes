@@ -20,7 +20,7 @@ The repository owner has explicitly permitted reuse of code and patterns from th
 
 # Current Status
 
-As of 2026-09-30, the project has completed the roadmap through **Upgrade 7**.
+As of 2026-09-30, the project has completed the roadmap through **Upgrade 8**.
 
 Implemented:
 
@@ -34,25 +34,23 @@ Implemented:
 - persistent document/notebook organization
 - stable page ordering and drag/drop
 - page metadata and page-number suggestions
-- document-scoped review and export groundwork
+- document-scoped review/export groundwork
+- opt-in automatic Primary/Secondary routing
+- bounded routing attempts and loop prevention
+- routing history and queue-safe mixed-AI jobs
 
 The next active milestone is:
 
-## Upgrade 8 — Automatic Primary / Secondary Routing
+## Upgrade 9 — Targeted Region / Equation Review
 
-Build automatic post-classification routing on top of the hardened queue engine.
+Planned next:
 
-Requirements:
-
-- opt-in automation
-- independent per-pile Primary/Secondary choice
-- maximum AI-attempt limits
-- no retry loops
-- queue-aware routing
-- visible routing/retry history
-- Approved pages remain protected
-- Needs Reapproval is never auto-approved
-- explicit fresh-vs-cache behavior remains controllable
+- equation/region-only retries
+- model-disagreement review
+- region-level provenance
+- dependency tracking
+- Needs Refresh when targeted re-analysis changes downstream text
+- preserve whole-page retry as a manual fallback
 
 ---
 
@@ -193,7 +191,117 @@ Each can use Primary or Secondary.
 
 These choices persist locally.
 
-Automatic post-classification rerouting is still a later milestone and must use retry limits and the hardened queue engine.
+Automatic post-classification rerouting is implemented in Upgrade 8 and uses the hardened durable queue.
+
+Automatic routing remains opt-in and uses these existing independent selectors rather than introducing a second routing configuration.
+
+---
+
+# Automatic Primary / Secondary Routing
+
+Upgrade 8 added opt-in automatic post-classification routing.
+
+Automatic routing is **off by default**.
+
+Eligible result classifications:
+
+- Review
+- Unclear
+- Math Unsure
+- selected Failed cases
+
+Good stops automatically.
+
+Approved and Needs Reapproval are protected from automatic routing.
+
+## Routing controls
+
+Current controls include:
+
+- Auto-route problem results checkbox
+- maximum processing attempts per page: 2–4
+- automatic retry policy:
+  - Fresh AI call
+  - Allow exact cache
+- existing independent Review / Unclear / Math Unsure / Failed Primary/Secondary selectors
+
+Default maximum is 2 total processing attempts per page.
+
+## Queue behavior
+
+Automatic routes are appended as new durable queue jobs.
+
+They are not recursive calls.
+
+Each queued route records its own:
+
+- page ID
+- Primary/Secondary pass
+- provider/model at execution
+- source classification
+- routing reason
+- fresh/cache policy
+- timestamps/outcome
+
+Mixed Primary and Secondary jobs can coexist in one durable queue.
+
+Restored queues keep each job's AI pass.
+
+If a pending routed job requires an API key/configuration that is not currently available, the queue pauses instead of failing the transcription.
+
+After credentials are entered, Resume continues the queue.
+
+## Loop prevention
+
+Every automatic route uses a signature:
+
+`classification → AI slot`
+
+The same automatic route signature is not queued twice for the same page.
+
+Automatic routing also stops when the configured maximum total processing attempts has been reached.
+
+This prevents loops such as:
+
+`Review → Secondary → Review → Secondary → ...`
+
+A new classification may route differently if there is still attempt budget and that route signature has not already been used.
+
+## Failed routing
+
+Non-transient Failed results may be routed when appropriate.
+
+Clear configuration/authentication failures do not automatically retry the same AI slot.
+
+They may route to the alternate AI slot if the user explicitly selected that alternate slot for Failed.
+
+Missing original image data is never considered recoverable through automatic AI routing.
+
+Transient network/rate-limit/timeout failures continue to use the Upgrade 6 backoff system and become Interrupted after exhaustion rather than entering automatic Failed routing.
+
+## Disabling automation
+
+Turning automatic routing off:
+
+- stops creation of new automatic routes
+- cancels pending not-yet-started automatic route jobs
+- does not kill a currently running request
+- preserves routing history
+
+## Routing history
+
+Each page retains visible automatic routing history.
+
+Events include:
+
+- queued
+- completed
+- stopped
+- cancelled
+
+Reasons include maximum-attempt stop, repeated-route prevention, approval protection, and configuration limits.
+
+Automatic routing never performs human approval.
 
 ---
 
@@ -602,6 +710,7 @@ It currently checks/reports:
 - concurrency
 - transient retry limit
 - durable queue state
+- automatic routing enabled/disabled state, max attempts, and cache policy
 - cached result count
 - interrupted job count
 - A2 self-tests
@@ -632,6 +741,11 @@ Diagnostics should remain action-oriented.
 15. page-number suggestions automatically reordering pages.
 16. document filtering breaking Guided Review navigation.
 17. stale duplicated HTML being appended after the canonical closing document.
+18. automatic routing bypassing the durable queue.
+19. repeated Review/Math Unsure routes creating infinite AI loops.
+20. automatic routing touching Approved or Needs Reapproval pages.
+21. missing Secondary credentials turning an automatic route into a Failed transcription instead of pausing the queue.
+22. disabling automatic routing leaving pending auto-route jobs silently active.
 
 ---
 
@@ -699,22 +813,19 @@ Diagnostics should remain action-oriented.
 - document-scoped Guided Review
 - document Markdown/PDF export groundwork
 
+### Upgrade 8 — Automatic Primary / Secondary Routing
+- opt-in automatic problem routing
+- independent per-pile AI choice
+- 2–4 total processing-attempt limit
+- repeated-route signature protection
+- durable mixed Primary/Secondary queue jobs
+- visible per-page routing history
+- fresh-call or exact-cache policy
+- queue pause when routed credentials are unavailable
+- pending-auto-route cancellation when automation is disabled
+- Approved / Needs Reapproval protection
+
 ## Next
-
-### Upgrade 8
-Automatic Primary/Secondary routing using the hardened queue engine.
-
-Required protections:
-
-- opt-in automation
-- per-pile routing remains independent
-- bounded attempts
-- no recursive retry loops
-- preserve queue durability
-- preserve revision history
-- protect Approved pages
-
-## Later
 
 ### Upgrade 9
 Equation/region-only retries, model-disagreement review, dependency tracking, Needs Refresh.
