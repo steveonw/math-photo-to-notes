@@ -123,7 +123,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     </div>
     <button class="primary" id="run">Process Batch</button>
     <label class="mode-toggle"><input id="auto-routing" type="checkbox"> Auto-fix flagged pages</label>
-    <label class="mode-toggle disabled" title="Planned for Release D"><input id="high-assurance" type="checkbox" disabled> High Assurance Math <span class="coming-soon">planned</span></label>
+    <label class="mode-toggle" title="Independently re-read eligible Good pages with the Secondary AI. Primary text is never replaced automatically."><input id="high-assurance" type="checkbox"> High Assurance Math</label>
     <button id="pause-queue">Pause</button>
     <button id="cancel-batch">Cancel</button>
     <span id="queue-status" class="small" style="font-weight:700">Queue idle</span>
@@ -160,6 +160,17 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
           <option value="reuse">Allow exact cache</option>
         </select>
         <span id="auto-routing-status" class="small">Off</span>
+      </div>
+      <div class="auto-route-box">
+        <b>High Assurance Math</b>
+        <span class="small">Verify Good pages:</span>
+        <select id="high-assurance-policy">
+          <option value="heavy" selected>Math-heavy only</option>
+          <option value="any-math">Any detected math</option>
+          <option value="all-good">All Good pages</option>
+        </select>
+        <span id="high-assurance-status" class="small">Off</span>
+        <span id="high-assurance-cost-preview" class="small">No added verifier calls while off.</span>
       </div>
       <button id="doctor">Doctor / Diagnostics</button>
       <button id="guided-review">Guided Review</button>
@@ -421,6 +432,7 @@ function safeProjectSettings(){
    },
    concurrency:Number($('concurrency')?.value||2),
    autoRouting:{enabled:autoRoutingEnabled(),maxAttempts:autoMaxAttempts(),cachePolicy:autoCachePolicy()},
+   highAssurance:{enabled:highAssuranceEnabled(),policy:highAssurancePolicy()},
    rates:{
      primaryInput:Number($('rate-primary-input')?.value||0),primaryOutput:Number($('rate-primary-output')?.value||0),
      secondaryInput:Number($('rate-secondary-input')?.value||0),secondaryOutput:Number($('rate-secondary-output')?.value||0)
@@ -438,6 +450,7 @@ function applySafeProjectSettings(settings){
  for(const [k,id] of Object.entries(ids))if(r[k]&&$(id))$(id).value=r[k];
  if(settings.concurrency&&$('concurrency'))$('concurrency').value=String(settings.concurrency);
  const a=settings.autoRouting||{};if($('auto-routing'))$('auto-routing').checked=!!a.enabled;if(a.maxAttempts&&$('auto-max-attempts'))$('auto-max-attempts').value=String(a.maxAttempts);if(a.cachePolicy&&$('auto-cache-policy'))$('auto-cache-policy').value=a.cachePolicy;
+ const ha=settings.highAssurance||{};if($('high-assurance'))$('high-assurance').checked=!!ha.enabled;if(ha.policy&&$('high-assurance-policy'))$('high-assurance-policy').value=ha.policy;
  const rates=settings.rates||{};
  for(const [key,id] of [['primaryInput','rate-primary-input'],['primaryOutput','rate-primary-output'],['secondaryInput','rate-secondary-input'],['secondaryOutput','rate-secondary-output']])if($(id)&&rates[key]!=null)$(id).value=String(rates[key]);
  syncProvider(1,false);syncProvider(2,false);saveSettings();
@@ -568,6 +581,11 @@ function hydrateSavedItems(saved){
      lastBatchId:x.lastBatchId||'',
      lastAutoFixEnabled:!!x.lastAutoFixEnabled,
      lastHighAssurance:!!x.lastHighAssurance,
+     lastHighAssurancePolicy:x.lastHighAssurancePolicy||'',
+     highAssuranceChecks:Array.isArray(x.highAssuranceChecks)?x.highAssuranceChecks:[],
+     highAssuranceStatus:x.highAssuranceStatus||'',
+     highAssuranceNote:x.highAssuranceNote||'',
+     highAssuranceAttempts:Number(x.highAssuranceAttempts||0),
      postProcessingError:!!x.postProcessingError,
      usageLog:Array.isArray(x.usageLog)?x.usageLog:[],
      externalCorrections:Array.isArray(x.externalCorrections)?x.externalCorrections:[],
@@ -644,6 +662,9 @@ function saveSettings(){
  if(auto)localStorage.setItem('sorted_ocr_auto_routing',auto.checked?'1':'0');
  if(max)localStorage.setItem('sorted_ocr_auto_max_attempts',max.value);
  if(policy)localStorage.setItem('sorted_ocr_auto_cache_policy',policy.value);
+ const ha=$('high-assurance'),haPolicy=$('high-assurance-policy');
+ if(ha)localStorage.setItem('sorted_ocr_high_assurance',ha.checked?'1':'0');
+ if(haPolicy)localStorage.setItem('sorted_ocr_high_assurance_policy',haPolicy.value);
  for(const id of ['rate-primary-input','rate-primary-output','rate-secondary-input','rate-secondary-output'])if($(id))localStorage.setItem('sorted_ocr_'+id,$(id).value);
 }
 function loadSettings(){
@@ -664,6 +685,9 @@ function loadSettings(){
  if(auto)auto.checked=localStorage.getItem('sorted_ocr_auto_routing')==='1';
  if(max)max.value=localStorage.getItem('sorted_ocr_auto_max_attempts')||'2';
  if(policy)policy.value=localStorage.getItem('sorted_ocr_auto_cache_policy')||'fresh';
+ const ha=$('high-assurance'),haPolicy=$('high-assurance-policy');
+ if(ha)ha.checked=localStorage.getItem('sorted_ocr_high_assurance')==='1';
+ if(haPolicy)haPolicy.value=localStorage.getItem('sorted_ocr_high_assurance_policy')||'heavy';
  for(const id of ['rate-primary-input','rate-primary-output','rate-secondary-input','rate-secondary-output'])if($(id))$(id).value=localStorage.getItem('sorted_ocr_'+id)||'0';
  syncProvider(1,false);
  syncProvider(2,false);
@@ -681,7 +705,7 @@ function syncProvider(which=1,reset=true){
 els.provider.addEventListener('change',()=>syncProvider(1,true));
 els.provider2.addEventListener('change',()=>syncProvider(2,true));
 [els.model,els.baseurl,els.model2,els.baseurl2,els.prompt].forEach(x=>x.addEventListener('change',saveSettings));
-['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai','concurrency','auto-routing','auto-max-attempts','auto-cache-policy','rate-primary-input','rate-primary-output','rate-secondary-input','rate-secondary-output'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',()=>{saveSettings();renderQueueStatus();renderUsageSummary()})});
+['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai','concurrency','auto-routing','auto-max-attempts','auto-cache-policy','high-assurance','high-assurance-policy','rate-primary-input','rate-primary-output','rate-secondary-input','rate-secondary-output'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',()=>{saveSettings();renderQueueStatus();renderUsageSummary()})});
 $('auto-routing')?.addEventListener('change',()=>{if(!autoRoutingEnabled())cancelPendingAutoRoutes()});
 
 async function addFiles(list){
@@ -696,14 +720,14 @@ async function addFiles(list){
      status:'queued',classification:'queued',reason:'Waiting to be processed.',
      text:'',rawText:'',repairedText:'',finalText:'',error:'',repairs:[],validationWarnings:[],validationDetails:[],mathRenderWarnings:[],history:[],reviewFlags:[],
      primaryAttempts:0,secondaryAttempts:0,failures:0,lastError:'',truncated:false,stopReason:'',
-     viewMode:'final',compareOpen:false,editingSnapshotTaken:false,imageHash:'',lastFingerprint:'',lastPromptFingerprint:'',lastBatchId:'',lastAutoFixEnabled:false,lastHighAssurance:false,lastAttemptId:'',
+     viewMode:'final',compareOpen:false,editingSnapshotTaken:false,imageHash:'',lastFingerprint:'',lastPromptFingerprint:'',lastBatchId:'',lastAutoFixEnabled:false,lastHighAssurance:false,lastHighAssurancePolicy:'',lastAttemptId:'',
      imageRotation:0,imageZoom:1,imageFit:'page',approvalAt:'',needsReapproval:false,
      transientRetries:0,transientErrors:[],retryNotBefore:'',
      documentId:(state.documentFilter!=='all'&&state.documentFilter!=='unfiled')?state.documentFilter:'',
      order:state.items.length,
      metadata:{title:'',className:'',chapter:'',lecture:'',date:'',pageNumber:'',tags:''},
      pageNumberSuggestion:null,dismissedPageSuggestion:'',
-     routingHistory:[],autoRoutingNote:'',regions:[],needsRefresh:false,preRefreshClassification:'',preRefreshReason:'',lastFailureStatus:0,postProcessingError:false,usageLog:[],externalCorrections:[]
+     routingHistory:[],autoRoutingNote:'',highAssuranceChecks:[],highAssuranceStatus:'',highAssuranceNote:'',highAssuranceAttempts:0,regions:[],needsRefresh:false,preRefreshClassification:'',preRefreshReason:'',lastFailureStatus:0,postProcessingError:false,usageLog:[],externalCorrections:[]
    });
    try{state.items[state.items.length-1].imageHash=await imageHashForFile(f)}catch(e){}
    refreshPageNumberSuggestion(state.items[state.items.length-1]);
@@ -1138,6 +1162,66 @@ function renderRegionCard(page,region){
 }
 function documentOptionsHTML(selected){
  return '<option value="">Unfiled</option>'+state.documents.map(d=>'<option value="'+esc(d.id)+'"'+(d.id===selected?' selected':'')+'>'+esc(d.name)+'</option>').join('');
+}
+function highAssuranceEnabled(){return !!$('high-assurance')?.checked}
+function highAssurancePolicy(){
+ const v=$('high-assurance-policy')?.value||'heavy';
+ return ['heavy','any-math','all-good'].includes(v)?v:'heavy';
+}
+function highAssurancePolicyLabel(v=highAssurancePolicy()){
+ return ({heavy:'Math-heavy only','any-math':'Any detected math','all-good':'All Good pages'})[v]||'Math-heavy only';
+}
+function highAssuranceMathSignals(text){
+ const t=String(text||''),segments=mathSegments(t),signals=[];let score=0;
+ const add=(name,points=1)=>{if(!signals.includes(name)){signals.push(name);score+=points}};
+ if(segments.length)add('math delimiters',1);
+ if(/\\(?:frac|dfrac|tfrac|sqrt|int|iint|iiint|sum|prod|lim|begin|partial|nabla)\b/.test(t))add('complex LaTeX structure',2);
+ if(/\\(?:alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|phi|psi|omega|infty)\b|[α-ωΑ-Ω]/u.test(t))add('Greek/special symbols',1);
+ if(/[\^_]/.test(segments.map(x=>x.text).join(' ')))add('superscript/subscript',1);
+ if(/[=≠≤≥≈±×÷]/.test(t))add('math operators/relations',1);
+ if((t.match(/\$\$|\\\[|\\begin\{/g)||[]).length)add('display math',1);
+ const mathChars=(t.match(/[=+\-*/^_{}\\<>≤≥≠≈±×÷∫∑√]/g)||[]).length;
+ if(mathChars>=10)add('high symbolic density',1);
+ return {score,signals,anyMath:segments.length>0||signals.length>0,heavy:score>=3};
+}
+function highAssuranceEligibility(i,policy=highAssurancePolicy()){
+ if(!i)return {eligible:false,reason:'Page is unavailable.',profile:highAssuranceMathSignals('')};
+ if(i.status!=='done'||i.classification!=='good')return {eligible:false,reason:'Only completed Good pages are verification candidates.',profile:highAssuranceMathSignals(i.finalText||i.text||'')};
+ const profile=highAssuranceMathSignals(i.finalText||i.text||'');
+ if(policy==='all-good')return {eligible:true,reason:'Policy verifies every Good page.',profile};
+ if(policy==='any-math')return {eligible:profile.anyMath,reason:profile.anyMath?'Detected mathematical notation.':'No deterministic math signal detected.',profile};
+ return {eligible:profile.heavy,reason:profile.heavy?'Deterministic math-heavy signals reached the verification threshold.':'Math-heavy threshold not reached.',profile};
+}
+function normalizeAssuranceText(text){
+ return String(text||'').normalize('NFKC').replace(/\r\n?/g,'\n').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+}
+function assuranceMathPayloads(text){
+ return mathSegments(String(text||'')).map(x=>x.text
+   .replace(/^\$\$|\$\$$/g,'').replace(/^\$|\$$/g,'')
+   .replace(/^\\\(|\\\)$/g,'').replace(/^\\\[|\\\]$/g,'')
+   .replace(/\\left|\\right/g,'').replace(/\s+/g,'').trim());
+}
+function diceSimilarity(a,b){
+ a=normalizeAssuranceText(a);b=normalizeAssuranceText(b);if(a===b)return 1;if(a.length<2||b.length<2)return 0;
+ const m=new Map();for(let i=0;i<a.length-1;i++){const g=a.slice(i,i+2);m.set(g,(m.get(g)||0)+1)}
+ let hits=0;for(let i=0;i<b.length-1;i++){const g=b.slice(i,i+2),n=m.get(g)||0;if(n){hits++;m.set(g,n-1)}}
+ return (2*hits)/((a.length-1)+(b.length-1));
+}
+function compareHighAssuranceTexts(primaryText,verifierText){
+ const a=normalizeAssuranceText(primaryText),b=normalizeAssuranceText(verifierText);
+ const pa=assuranceMathPayloads(primaryText),pb=assuranceMathPayloads(verifierText);
+ const mathEqual=pa.length===pb.length&&pa.every((x,i)=>x===pb[i]);
+ const similarity=diceSimilarity(a,b),exact=a===b;
+ const disagree=!mathEqual||similarity<0.94;
+ return {exact,mathEqual,similarity,disagree,primaryMath:pa,verifierMath:pb};
+}
+function highAssuranceCostPreview(){
+ const queued=state.items.filter(i=>i.status==='queued'||i.status==='interrupted').length;
+ if(!highAssuranceEnabled())return 'No added verifier calls while off.';
+ const report=buildUsageReport(state.items),events=report.events.filter(e=>e.pass==='secondary'&&!e.cached&&e.estimatedCost>0);
+ const avg=events.length?events.reduce((n,e)=>n+e.estimatedCost,0)/events.length:0;
+ const scope=highAssurancePolicy()==='all-good'?'Good pages':'eligible Good pages';
+ return avg?'Up to '+queued+' extra Secondary call'+(queued===1?'':'s')+' for '+scope+' · historical avg '+avg.toFixed(4)+' USD/call · max estimate '+(avg*queued).toFixed(4)+' USD.':'Up to '+queued+' extra Secondary call'+(queued===1?'':'s')+' for '+scope+'. Enter token rates and build usage history for a dollar estimate.';
 }
 function autoRoutingEnabled(){return !!$('auto-routing')?.checked}
 function autoMaxAttempts(){const n=Number($('auto-max-attempts')?.value||2);return Math.max(2,Math.min(4,Number.isFinite(n)?n:2))}
