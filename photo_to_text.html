@@ -1569,9 +1569,12 @@ async function runA2SelfTests(){
  test('page-number suggestion does not mutate metadata',!('pageNumber' in (orderProbe[0].metadata||{})));
  const routeProbe={classification:'review',needsReapproval:false,primaryAttempts:1,secondaryAttempts:0,routingHistory:[]};
  test('auto route allows first bounded review route',autoRouteGuardReason(routeProbe,'review','secondary','primary',2)==='');
+ test('auto route stops at maximum attempts',/Maximum 2/.test(autoRouteGuardReason({...routeProbe,primaryAttempts:2},'review','secondary','primary',2)));
  routeProbe.routingHistory.push({action:'queued',signature:'review>secondary'});
  test('auto route stops repeated route signature',/prevent/.test(autoRouteGuardReason(routeProbe,'review','secondary','primary',3)));
  test('auto route protects Approved state',/protected/.test(autoRouteGuardReason({classification:'approved',primaryAttempts:1,secondaryAttempts:0,routingHistory:[]},'review','secondary','primary',3)));
+ test('same-provider auth failure is not auto-routable',eligibleAutomaticFailure({lastFailureStatus:401,lastError:'Unauthorized'},'primary','primary')===false);
+ test('auth failure may switch to alternate AI slot',eligibleAutomaticFailure({lastFailureStatus:401,lastError:'Unauthorized'},'secondary','primary')===true);
  return {passed:tests.filter(x=>x.ok).length,total:tests.length,tests};
 }
 
@@ -1597,7 +1600,7 @@ async function runDoctor(){
    ['Durable queue',state.queuePlan?(state.queuePaused?'Paused / resumable':'Active'):'Idle'],
    ['Cached results',String(cacheCount)],
    ['Interrupted jobs',String(interrupted)],
-   ['A2 self-tests',selfTests.passed+'/'+selfTests.total+' passed'],
+   ['Self-tests',selfTests.passed+'/'+selfTests.total+' passed'],
    ['Primary',p.provider+' / '+(p.model||'(model missing)')],
    ['Primary key',p.apiKey?'Present (not stored)':'Missing'],
    ['Primary vision capability',String(caps1.vision)],
