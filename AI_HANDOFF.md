@@ -1096,114 +1096,131 @@ Diagnostics should remain action-oriented.
 
 ---
 
-# Current Roadmap
+# Current Product Plan
 
-## Completed / substantially implemented
+The original numbered Upgrade 1–10 roadmap is complete.
 
-### Upgrade 1 — Phase A
-- Approved
-- raw/repaired/final versions
-- revision history
-- truncation detection
-- retry counters
-- safer LaTeX validation
-- baseline autosave
+Active product work now follows the second-generation roadmap in `UPGRADE_PLAN.md`.
 
-### Upgrade 2 — Phase A2
-- project schema
-- IndexedDB
-- fallback recovery
-- provider capability registry
-- Doctor diagnostics
+## Product direction
 
-### Upgrade 3 — Phase A2 continuation
-- request identity
-- cancellation
-- timeout
-- stale-result guards
-- Interrupted state
-- image/process fingerprints
-- exact-result cache
-- initial self-tests
+Use one underlying processing engine with a simplified user-facing workflow:
 
-### Upgrade 4 — Math Review
-- live MathJax preview
-- structured validation
-- Math Unsure parsing/display
-- math-warning categories
+- **Quick Transcribe** — one Primary semantic pass, classify, stop
+- **Auto-fix flagged pages** — optional bounded rerouting of problem piles
+- **High Assurance Math** — optional higher-cost independent verification
+- **Guided Review** — post-processing review action, not a separate processing mode
 
-### Upgrade 5 — Human Review
-- guided review
-- side-by-side layout
-- zoom/rotation/fit
-- keyboard shortcuts
-- anchored review flags
+The default user story is:
+
+> Turn these photos into text, tell me what looks questionable, and let me deal with those pages now or later.
+
+## Active releases
+
+### Release A — Simplified Batch UX
+- Quick Transcribe default
+- Auto-fix flagged pages
+- actionable batch completion dashboard
+- Resume Interrupted
+- Retry Failed
+- direct links into Guided Review
+
+### Release B — Good-page spot checks
+- random spot-check sample
+- OK / Error found
+- optional error categories
+- persistent reliability ledger
+- provider/model/prompt/processing provenance
+- accumulated human-reviewed counts
+- no unsupported formal accuracy percentage
+
+### Release C — External AI round trip
+Export and import ship together.
+
+- chat-friendly problem-page chunks
+- stable page IDs
+- generated external-review prompt
+- external AI returns proposed text only
+- tolerant JSON/code-fence parser
+- unknown/missing/malformed page reporting
+- mandatory diff before any change
+- Accept / Reject / Edit proposal
+- revision history + provenance
+- deterministic revalidation
+- Approved → Needs Reapproval after accepted change
+- external AI never controls application classification or approval
+
+### Release D — High Assurance Math
+- deterministic math-heavy triggers
+- independent verifier/second reading
+- no hidden reasoning transfer
+- disagreement → Review
+- no automatic winner
+- explicit added-cost visibility
+- evaluate usefulness using spot-check evidence
+
+### Release E — Infrastructure hardening
+- durable targeted-region queue jobs
+- explicit project-schema migrations
+- larger checked-in browser regression corpus
+- self-host MathJax
+- memory-efficient/compressed archive support
+- optional image-quality tools if reliability data shows they are worthwhile
+
+## Important interpretation of Good
+
+`Good` means:
+
+**No automatic warning signals were detected.**
+
+It does not mean:
+
+- independently verified
+- human reviewed
+- guaranteed correct
+
+Batch summaries should say this explicitly.
+
+## Spot-check evidence
+
+Store each human Good-page spot-check with:
+
+- page ID
+- timestamp
+- provider/model/pass
+- prompt fingerprint
+- processing fingerprint
+- batch/run context
+- Auto-fix / High Assurance settings
+- OK or Error found
+- optional error type/note
+
+Show earned counts such as:
+
+> Across 40 spot-checked Good pages from this model/prompt, 37 were marked OK and 3 had errors.
+
+Do not automatically convert that into a formal accuracy claim.
+
+## External AI authority boundary
+
+External AI is an untrusted proposal source.
+
+It may return:
+
+- page ID
+- proposed corrected text
+- optional note
+
+It must not control:
+
+- pile/classification
+- approval
 - Needs Reapproval
+- Needs Refresh
 
-### Upgrade 6 — Batch Queue
-- durable ordered queue
-- concurrency
-- pause/resume
-- cancellation
-- transient retries
-- Retry-After
-- exponential backoff
+Imported proposals require human diff review before final text changes.
 
-### Upgrade 7 — Document Organization + Page Ordering
-- persistent document/notebook groups
-- Unfiled pages
-- stable persisted order
-- drag-and-drop reordering
-- title/class/chapter/lecture/date/page/tags metadata
-- non-destructive page-number suggestions
-- explicit accept/dismiss/apply suggestion controls
-- document-scoped Guided Review
-- document Markdown/PDF export groundwork
-
-### Upgrade 8 — Automatic Primary / Secondary Routing
-- opt-in automatic problem routing
-- independent per-pile AI choice
-- 2–4 total processing-attempt limit
-- repeated-route signature protection
-- durable mixed Primary/Secondary queue jobs
-- visible per-page routing history
-- fresh-call or exact-cache policy
-- queue pause when routed credentials are unavailable
-- pending-auto-route cancellation when automation is disabled
-- Approved / Needs Reapproval protection
-
-### Upgrade 9 — Targeted Region / Equation Review
-- visual crop picker over the original unrotated image
-- optional link to selected final-transcription text
-- targeted Primary retry
-- targeted Secondary retry
-- Primary/Secondary comparison
-- model-disagreement detection without automatic winner selection
-- region crop hash and result provenance
-- anchored dependency tracking/re-anchoring
-- explicit preferred-result selection
-- Needs Refresh state
-- explicit Apply preferred / Keep current resolution
-- previously Approved pages preserve reapproval lineage
-- whole-page retry remains available
-
-### Upgrade 10 — Export / Archive / Review Packages
-- explicit versioned Save Project / Open Project
-- API-key-free safe settings export
-- dependency-free browser ZIP writer
-- full project archive with originals and transcription lineage
-- page Review package ZIP
-- targeted-region Review package ZIP
-- combined Markdown / plain text / LaTeX exports
-- normalized usage report
-- user-entered Primary/Secondary input/output rates
-- estimated project cost summary
-- standalone provenance/audit manifest
-- export safety regression checks
-
-## Numbered roadmap complete
-
-The remaining backlog is hardening and optional high-accuracy work rather than a defined Upgrade 11.
+See `UPGRADE_PLAN.md` for the full release plan and acceptance criteria.
 
 ---
 
