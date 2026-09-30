@@ -16,6 +16,8 @@ At the end of a run, the dashboard can open flagged pages in Guided Review, resu
 
 Release B adds **Good-page spot checks**. A completed batch can randomly sample 1, 5, 10, or 20 Good pages for source-image review. Human outcomes are recorded as OK or Error found, with optional error category/note. Error-found pages move to Review without changing their transcription. The persistent reliability ledger records model, prompt fingerprint, processing fingerprint, image/final-text hashes, and batch settings; the UI reports only human-reviewed counts, not a formal accuracy percentage.
 
+Release C adds **Review with External AI** as a full export/import round trip. Problem pages are packaged in 5/10/20-page chunks with source images, stable IDs, transcriptions, warnings, a ready-made prompt, and an exact return template. Returned AI text is treated only as a proposal: tolerant import reports unknown/duplicate/malformed/missing pages, then requires a source/current/proposed diff review before Accept / Reject / Edit. Accepted changes preserve revision/provenance and Approved lineage; external AI can never approve or directly classify a page.
+
 **High Assurance Math** is shown as a disabled future option and is not active yet.
 
 ## Current capabilities
@@ -31,7 +33,9 @@ Release B adds **Good-page spot checks**. A completed batch can randomly sample 
 - optional bounded automatic Primary/Secondary routing
 - targeted equation/region crop retries and model-disagreement review
 - versioned project Save/Open
-- project archive ZIP, review-package ZIPs, Markdown/plain-text/LaTeX/PDF exports
+- project archive ZIP, page/region review-package ZIPs, and external-AI round-trip review packages
+- tolerant external correction import with mandatory diff / Accept / Reject / Edit
+- Markdown/plain-text/LaTeX/PDF exports
 - provenance/audit and usage/cost reports
 
 ## Main file
@@ -57,6 +61,8 @@ The browser suite must exercise the real standalone page, not only parse its Jav
 - a mocked provider response containing LaTeX through the normal Process Batch UI
 - preservation of a successful raw provider result when local post-processing throws
 - Gemini authentication via the `x-goog-api-key` header rather than the request URL
+- Good-page spot-check persistence and human-found error handling
+- external-AI package contract, tolerant import parsing, mandatory diff, accept/reject behavior, and Approved → Needs Reapproval lineage
 
 ## Project docs
 
