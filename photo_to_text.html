@@ -39,6 +39,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
 .historybox{margin-top:10px}.historybox summary{cursor:pointer;font-weight:700}.historybox ol{padding-left:20px}.historybox li{margin:6px 0;font-size:12px}
 .editorgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}.previewpane{border:1px solid var(--line);border-radius:12px;padding:12px;min-height:380px;background:#fff;white-space:pre-wrap;overflow-wrap:anywhere}.previewpane.render-error{border-color:#dc2626;background:#fef2f2}.previewtitle{font-size:12px;font-weight:800;margin-bottom:8px}.math-warning-list{display:grid;gap:7px;margin:10px 0}.math-warning{border:1px solid #fed7aa;background:#fff7ed;border-radius:10px;padding:8px 10px;font-size:12px}.math-warning code{display:block;margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere}.math-marker{border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:8px 10px;font-size:12px}
 .review-flags{display:grid;gap:7px;margin:10px 0}.review-flag{border:1px solid #cbd5e1;border-radius:10px;padding:8px 10px;background:#f8fafc;font-size:12px}.review-flag.detached{border-color:#f59e0b;background:#fffbeb}.review-flag code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;margin:5px 0}.review-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.shortcut-help{padding:7px 9px;border-radius:10px;background:#f4f4f5;font-size:11px;color:var(--muted)}
+.orgbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;padding:12px;border:1px solid var(--line);border-radius:14px;background:#fafafa}.orgbar select{width:auto;min-width:180px}.metadata-box{margin-top:10px;border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff}.metadata-box summary{cursor:pointer;font-weight:800;font-size:12px}.metadata-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.metadata-grid label{margin:0}.metadata-grid input{padding:7px 8px;font-size:12px}.drag-handle{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:grab;user-select:none}.card.dragging{opacity:.45}.card.drop-target{outline:3px solid #93c5fd;outline-offset:-3px}.page-suggestion{margin-top:8px;padding:8px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px;font-size:12px}.doc-chip{display:inline-block;padding:3px 7px;border-radius:999px;background:#e0e7ff;color:#3730a3;font-size:10px;font-weight:800;margin-top:5px}
 @media(max-width:1050px){.editorgrid,.guided-review .card{grid-template-columns:1fr}}
 @media(max-width:900px){.top,.card{grid-template-columns:1fr}.side{border-right:0;border-bottom:1px solid var(--line)}.stats{grid-template-columns:repeat(2,1fr)}}
 </style>
@@ -179,6 +180,21 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
 </section>
 
 <section class="panel">
+  <div class="orgbar">
+    <b>Organization</b>
+    <span class="small">Document / notebook:</span>
+    <select id="document-filter">
+      <option value="all">All documents</option>
+      <option value="unfiled">Unfiled</option>
+    </select>
+    <button id="new-document">New document</button>
+    <button id="rename-document">Rename</button>
+    <button id="delete-document">Delete group</button>
+    <button id="apply-page-suggestions">Apply page-number suggestions</button>
+    <button id="download-document">Download current document .md</button>
+    <button id="pdf-document">PDF current document</button>
+    <span class="small">Drag page cards to reorder. Suggested page numbers never reorder automatically.</span>
+  </div>
   <div class="pile-tabs" id="tabs">
     <button data-filter="all" class="active">All</button>
     <button data-filter="good">Good</button>
@@ -222,7 +238,7 @@ Rules:
 - Example:
   [MATH_UNSURE: seen="x ? 4" guess="$x+4$" note="operator could be + or -"] (I think it says: $x+4$)`
 
-const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarning:'',cancelRequested:false,activeControllers:new Map(),previewTimers:new Map(),guidedReview:false,guidedItemId:null,queuePlan:null,queueRuntimeSnap:null,queuePaused:false,queuePumpScheduled:false};
+const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarning:'',cancelRequested:false,activeControllers:new Map(),previewTimers:new Map(),guidedReview:false,guidedItemId:null,queuePlan:null,queueRuntimeSnap:null,queuePaused:false,queuePumpScheduled:false,documents:[],documentFilter:'all',dragItemId:null};
 const AUTOSAVE_KEY='math_photo_to_notes_phase_a_v1';
 const PROJECT_SCHEMA='math-photo-notes-project-v1';
 const DB_NAME='math-photo-to-notes';
@@ -306,6 +322,8 @@ function projectEnvelope(includeImages=true){
    version:1,
    savedAt:new Date().toISOString(),
    filter:state.filter,
+   documentFilter:state.documentFilter,
+   documents:state.documents,
    queue:state.queuePlan?{
      ...state.queuePlan,
      paused:state.queuePaused,
@@ -349,6 +367,9 @@ function dataUrlToFile(dataUrl,name){
 }
 function hydrateSavedItems(saved){
  state.filter=saved.filter||'all';
+ state.documents=Array.isArray(saved.documents)?saved.documents.filter(x=>x&&x.id&&x.name).map(x=>({...x})):[];
+ state.documentFilter=saved.documentFilter||'all';
+ if(state.documentFilter!=='all'&&state.documentFilter!=='unfiled'&&!state.documents.some(d=>d.id===state.documentFilter))state.documentFilter='all';
  state.queuePlan=saved.queue&&Array.isArray(saved.queue.jobs)?{
    ...saved.queue,
    jobs:saved.queue.jobs.map(j=>({...j,state:j.state==='done'?'done':'pending'}))
@@ -382,6 +403,19 @@ function hydrateSavedItems(saved){
      transientRetries:Number(x.transientRetries||0),
      transientErrors:Array.isArray(x.transientErrors)?x.transientErrors:[],
      retryNotBefore:x.retryNotBefore||'',
+     documentId:x.documentId||'',
+     order:Number.isFinite(Number(x.order))?Number(x.order):idx,
+     metadata:{
+       title:x.metadata?.title||'',
+       className:x.metadata?.className||'',
+       chapter:x.metadata?.chapter||'',
+       lecture:x.metadata?.lecture||'',
+       date:x.metadata?.date||'',
+       pageNumber:x.metadata?.pageNumber||'',
+       tags:x.metadata?.tags||''
+     },
+     pageNumberSuggestion:x.pageNumberSuggestion||null,
+     dismissedPageSuggestion:x.dismissedPageSuggestion||'',
      primaryAttempts:Number(x.primaryAttempts||0),
      secondaryAttempts:Number(x.secondaryAttempts||0),
      failures:Number(x.failures||0),
@@ -394,6 +428,9 @@ function hydrateSavedItems(saved){
      activeAttemptId:''
    };
  });
+ state.items.sort((a,b)=>Number(a.order||0)-Number(b.order||0));
+ normalizeItemOrder();
+ for(const i of state.items)refreshPageNumberSuggestion(i);
 }
 async function restoreProjectState(){
  let saved=null;
@@ -495,9 +532,14 @@ async function addFiles(list){
      primaryAttempts:0,secondaryAttempts:0,failures:0,lastError:'',truncated:false,stopReason:'',
      viewMode:'final',compareOpen:false,editingSnapshotTaken:false,imageHash:'',lastFingerprint:'',lastAttemptId:'',
      imageRotation:0,imageZoom:1,imageFit:'page',approvalAt:'',needsReapproval:false,
-     transientRetries:0,transientErrors:[],retryNotBefore:''
+     transientRetries:0,transientErrors:[],retryNotBefore:'',
+     documentId:(state.documentFilter!=='all'&&state.documentFilter!=='unfiled')?state.documentFilter:'',
+     order:state.items.length,
+     metadata:{title:'',className:'',chapter:'',lecture:'',date:'',pageNumber:'',tags:''},
+     pageNumberSuggestion:null,dismissedPageSuggestion:''
    });
    try{state.items[state.items.length-1].imageHash=await imageHashForFile(f)}catch(e){}
+   refreshPageNumberSuggestion(state.items[state.items.length-1]);
 
  }
  scheduleAutosave(); render();
@@ -697,6 +739,55 @@ function classifyText(text){
  return {classification:'good',reason:'No automatic warning signs detected.'};
 }
 
+function documentName(id){
+ if(!id)return 'Unfiled';
+ return state.documents.find(d=>d.id===id)?.name||'Unfiled';
+}
+function normalizeItemOrder(){
+ state.items.forEach((i,idx)=>{i.order=idx});
+}
+function organizationScopedItems(){
+ if(state.documentFilter==='all')return state.items;
+ if(state.documentFilter==='unfiled')return state.items.filter(i=>!i.documentId);
+ return state.items.filter(i=>i.documentId===state.documentFilter);
+}
+function pageNumberCandidateFromText(text){
+ const t=String(text||'');
+ const direct=t.match(/(?:^|\n)\s*(?:page|pg\.?|p\.?)\s*#?\s*(\d{1,4})\b/im);
+ if(direct)return {value:direct[1],source:'transcription label'};
+ const lines=t.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+ for(const line of [...lines.slice(0,3),...lines.slice(-3)]){
+   if(/^\d{1,4}$/.test(line))return {value:line,source:'isolated edge line'};
+ }
+ return null;
+}
+function suggestPageNumber(i){
+ const name=String(i?.name||'');
+ let m=name.match(/(?:page|pg|p)[ _.-]*0*(\d{1,4})/i);
+ if(m)return {value:String(Number(m[1])),source:'filename label'};
+ m=name.replace(/\.[^.]+$/,'').match(/(?:^|[^0-9])0*(\d{1,4})$/);
+ if(m)return {value:String(Number(m[1])),source:'filename ending'};
+ return pageNumberCandidateFromText(i?.finalText||i?.text||i?.rawText||'');
+}
+function refreshPageNumberSuggestion(i){
+ if(!i)return;
+ const s=suggestPageNumber(i);
+ if(!s||s.value===i.metadata?.pageNumber||s.value===i.dismissedPageSuggestion){i.pageNumberSuggestion=null;return}
+ i.pageNumberSuggestion=s;
+}
+function renderOrganizationControls(){
+ const sel=$('document-filter');if(!sel)return;
+ const current=state.documentFilter;
+ sel.innerHTML='<option value="all">All documents</option><option value="unfiled">Unfiled</option>'+state.documents.map(d=>'<option value="'+esc(d.id)+'">'+esc(d.name)+'</option>').join('');
+ sel.value=(current==='all'||current==='unfiled'||state.documents.some(d=>d.id===current))?current:'all';
+ state.documentFilter=sel.value;
+ const hasDoc=state.documentFilter!=='all'&&state.documentFilter!=='unfiled';
+ const rename=$('rename-document'),del=$('delete-document'),apply=$('apply-page-suggestions'),down=$('download-document'),pdf=$('pdf-document');
+ if(rename)rename.disabled=!hasDoc;if(del)del.disabled=!hasDoc;
+ if(apply)apply.disabled=!organizationScopedItems().some(i=>i.pageNumberSuggestion&&!i.metadata?.pageNumber);
+ if(down)down.disabled=state.documentFilter==='all';
+ if(pdf)pdf.disabled=state.documentFilter==='all';
+}
 function stats(){
  const counts={total:state.items.length,good:0,review:0,unclear:0,mathunsure:0,approved:0,needsreapproval:0,failed:0,queued:0,running:0,interrupted:0};
  state.items.forEach(i=>{
@@ -711,8 +802,9 @@ function renderStats(){
  const s=stats(); Object.keys(s).forEach(k=>{const e=$('s-'+k);if(e)e.textContent=s[k]});
 }
 function visibleItems(){
- if(state.filter==='all') return state.items;
- return state.items.filter(i=>i.classification===state.filter || (state.filter==='queued'&&i.status==='queued') || (state.filter==='interrupted'&&i.status==='interrupted'));
+ const base=organizationScopedItems();
+ if(state.filter==='all')return base;
+ return base.filter(i=>i.classification===state.filter || (state.filter==='queued'&&i.status==='queued') || (state.filter==='interrupted'&&i.status==='interrupted'));
 }
 function badgeClass(i){return i.status==='running'?'running':i.status==='queued'?'queued':i.status==='interrupted'?'interrupted':i.classification}
 function badgeLabel(i){return i.status==='running'?'Running':i.status==='queued'?'Queued':i.status==='interrupted'?'Interrupted':({good:'Good',review:'Review',unclear:'Unclear',mathunsure:'Math Unsure',approved:'Approved',needsreapproval:'Needs Reapproval',failed:'Failed',interrupted:'Interrupted'})[i.classification]||i.classification}
@@ -785,6 +877,7 @@ function renderQueueStatus(){
 function render(){
  renderStats();
  renderQueueStatus();
+ renderOrganizationControls();
  const allList=visibleItems();
  syncGuidedItem(allList);
  let list=allList;
