@@ -9,6 +9,7 @@
   --bg:#f4f4f5;--card:#fff;--text:#18181b;--muted:#71717a;--line:#e4e4e7;
   --accent:#111827;--good:#047857;--goodbg:#ecfdf5;--review:#7c3aed;--reviewbg:#f5f3ff;
   --unclear:#b45309;--unclearbg:#fffbeb;--failed:#b91c1c;--failedbg:#fef2f2;
+  --approved:#166534;--approvedbg:#f0fdf4;
   --queued:#52525b;--running:#1d4ed8;--runningbg:#eff6ff
 }
 *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
@@ -19,17 +20,20 @@ label{display:block;margin:10px 0}.label{display:block;font-size:12px;font-weigh
 input,select,textarea,button{font:inherit} input,select,textarea{width:100%;padding:10px 11px;border:1px solid #d4d4d8;border-radius:12px;background:#fff}
 textarea{min-height:145px;resize:vertical}.toolbar{display:flex;flex-wrap:wrap;gap:9px;margin-top:14px}
 button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius:12px;font-weight:700;cursor:pointer}button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}button:disabled{opacity:.5;cursor:not-allowed}
-.stats{display:grid;grid-template-columns:repeat(7,1fr);gap:9px;margin-top:16px}.stat{border:1px solid var(--line);border-radius:14px;padding:11px}.stat b{font-size:23px;display:block}.stat span{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+.stats{display:grid;grid-template-columns:repeat(9,1fr);gap:9px;margin-top:16px}.stat{border:1px solid var(--line);border-radius:14px;padding:11px}.stat b{font-size:23px;display:block}.stat span{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.08em}
 .pile-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}.pile-tabs button.active{background:#111827;color:#fff}
 .card{display:grid;grid-template-columns:280px 1fr;overflow:hidden;padding:0}.side{padding:16px;border-right:1px solid var(--line);background:#fafafa}.main{padding:16px}
 .preview{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:14px;border:1px solid var(--line);margin-top:12px}.name{font-weight:800;word-break:break-word}.small{font-size:12px;color:var(--muted)}
 .badge{display:inline-block;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;border:1px solid var(--line)}
 .badge.good{color:var(--good);background:var(--goodbg)}.badge.review{color:var(--review);background:var(--reviewbg)}.badge.unclear{color:var(--unclear);background:var(--unclearbg)}.badge.mathunsure{color:#9a3412;background:#fff7ed}
-.badge.failed{color:var(--failed);background:var(--failedbg)}.badge.running{color:var(--running);background:var(--runningbg)}.badge.queued{color:var(--queued);background:#f4f4f5}
+.badge.failed{color:var(--failed);background:var(--failedbg)}.badge.approved{color:var(--approved);background:var(--approvedbg)}.badge.running{color:var(--running);background:var(--runningbg)}.badge.queued{color:var(--queued);background:#f4f4f5}
 .output{width:100%;min-height:380px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.55}.reason{margin:8px 0 12px;padding:9px 11px;border:1px solid var(--line);border-radius:11px;background:#fafafa;font-size:12px}
 .error{background:var(--failedbg);color:var(--failed);padding:10px;border-radius:11px;margin:8px 0;white-space:pre-wrap}
 .hidden{display:none!important}.empty{text-align:center;padding:45px;color:var(--muted)}
 .manual{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.manual button{padding:7px 9px;font-size:12px}
+.versionbar{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.versionbar button{padding:7px 9px;font-size:12px}.versionbar button.active{background:#111827;color:#fff}
+.comparebox{border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0;background:#fafafa}.comparebox pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0 14px;font-size:12px}
+.historybox{margin-top:10px}.historybox summary{cursor:pointer;font-weight:700}.historybox ol{padding-left:20px}.historybox li{margin:6px 0;font-size:12px}
 @media(max-width:900px){.top,.card{grid-template-columns:1fr}.side{border-right:0;border-bottom:1px solid var(--line)}.stats{grid-template-columns:repeat(2,1fr)}}
 </style>
 
@@ -46,6 +50,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     <div class="stat"><span>Review</span><b id="s-review">0</b></div>
     <div class="stat"><span>Unclear</span><b id="s-unclear">0</b></div>
     <div class="stat"><span>Math Unsure</span><b id="s-mathunsure">0</b></div>
+    <div class="stat"><span>Approved</span><b id="s-approved">0</b></div>
     <div class="stat"><span>Failed</span><b id="s-failed">0</b></div>
     <div class="stat"><span>Queued</span><b id="s-queued">0</b></div>
     <div class="stat"><span>Running</span><b id="s-running">0</b></div>
@@ -140,6 +145,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     <button id="pdf-review">PDF: Review</button>
     <button id="pdf-unclear">PDF: Unclear</button>
     <button id="pdf-mathunsure">PDF: Math Unsure</button>
+    <button id="pdf-approved">PDF: Approved</button>
     <button id="clear">Clear all</button>
   </div>
 </section>
@@ -151,6 +157,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     <button data-filter="review">Review</button>
     <button data-filter="unclear">Unclear</button>
     <button data-filter="mathunsure">Math Unsure</button>
+    <button data-filter="approved">Approved</button>
     <button data-filter="failed">Failed</button>
     <button data-filter="queued">Queued</button>
   </div>
@@ -185,13 +192,77 @@ Rules:
 - Example:
   [MATH_UNSURE: seen="x ? 4" guess="$x+4$" note="operator could be + or -"] (I think it says: $x+4$)`
 
-const state={items:[],filter:'all',running:false};
+const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarning:''};
+const AUTOSAVE_KEY='math_photo_to_notes_phase_a_v1';
 
 const $=id=>document.getElementById(id);
 const els={provider:$('provider'),model:$('model'),basewrap:$('basewrap'),baseurl:$('baseurl'),apikey:$('apikey'),provider2:$('provider2'),model2:$('model2'),basewrap2:$('basewrap2'),baseurl2:$('baseurl2'),apikey2:$('apikey2'),prompt:$('prompt'),files:$('files'),drop:$('drop'),results:$('results')};
 
 function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
 function slug(s){return (s||'page').toLowerCase().replace(/\.[^.]+$/,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60)||'page'}
+
+function serializableItem(i,includeImage=true){
+ const copy={...i};
+ delete copy.file; delete copy.url; delete copy.editingSnapshotTaken;
+ if(!includeImage) delete copy.imageData;
+ return copy;
+}
+function saveProjectState(){
+ const payload={version:1,savedAt:new Date().toISOString(),filter:state.filter,items:state.items.map(i=>serializableItem(i,true))};
+ try{
+   localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(payload));
+   state.autosaveWarning='';
+ }catch(e){
+   try{
+     payload.items=state.items.map(i=>serializableItem(i,false));
+     localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(payload));
+     state.autosaveWarning='Autosave saved text/history, but browser storage was too small to retain image copies.';
+   }catch(e2){
+     state.autosaveWarning='Autosave failed because browser storage is full or unavailable.';
+   }
+ }
+}
+function scheduleAutosave(){
+ clearTimeout(state.autosaveTimer);
+ state.autosaveTimer=setTimeout(saveProjectState,350);
+}
+function dataUrlToFile(dataUrl,name){
+ if(!dataUrl)return null;
+ const parts=dataUrl.split(','), meta=parts[0]||'', raw=atob(parts[1]||'');
+ const mime=(meta.match(/data:([^;]+)/)||[])[1]||'image/jpeg';
+ const bytes=new Uint8Array(raw.length);
+ for(let n=0;n<raw.length;n++)bytes[n]=raw.charCodeAt(n);
+ return new File([bytes],name||'restored-image',{type:mime});
+}
+async function restoreProjectState(){
+ let saved=null;
+ try{saved=JSON.parse(localStorage.getItem(AUTOSAVE_KEY)||'null')}catch(e){}
+ if(!saved||!Array.isArray(saved.items))return;
+ state.filter=saved.filter||'all';
+ state.items=saved.items.map((x,idx)=>{
+   const file=x.imageData?dataUrlToFile(x.imageData,x.name):null;
+   return {
+     ...x,
+     id:x.id||(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+idx),
+     file,
+     url:x.imageData||'',
+     rawText:x.rawText||'',
+     repairedText:x.repairedText||x.text||'',
+     finalText:x.finalText||x.text||x.repairedText||'',
+     text:x.finalText||x.text||x.repairedText||'',
+     history:Array.isArray(x.history)?x.history:[],
+     repairs:Array.isArray(x.repairs)?x.repairs:[],
+     validationWarnings:Array.isArray(x.validationWarnings)?x.validationWarnings:[],
+     primaryAttempts:Number(x.primaryAttempts||0),
+     secondaryAttempts:Number(x.secondaryAttempts||0),
+     failures:Number(x.failures||0),
+     viewMode:x.viewMode||'final',
+     compareOpen:false,
+     editingSnapshotTaken:false
+   };
+ });
+}
+function clearAutosave(){localStorage.removeItem(AUTOSAVE_KEY)}
 function saveSettings(){
  localStorage.setItem('sorted_ocr_provider',els.provider.value);
  localStorage.setItem('sorted_ocr_model',els.model.value.trim());
@@ -234,13 +305,22 @@ els.provider2.addEventListener('change',()=>syncProvider(2,true));
 [els.model,els.baseurl,els.model2,els.baseurl2,els.prompt].forEach(x=>x.addEventListener('change',saveSettings));
 ['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',saveSettings)});
 
-function addFiles(list){
- [...list].filter(f=>f.type.startsWith('image/')).forEach((f,i)=>state.items.push({
-   id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+i+'-'+Math.random(),
-   file:f,name:f.name,size:f.size,url:URL.createObjectURL(f),
-   status:'queued',classification:'queued',reason:'Waiting to be processed.',text:'',rawText:'',error:'',repairs:[],history:[]
- }));
- render();
+async function addFiles(list){
+ const files=[...list].filter(f=>f.type.startsWith('image/'));
+ for(let i=0;i<files.length;i++){
+   const f=files[i];
+   let imageData='';
+   try{imageData=await dataURL(f)}catch(e){}
+   state.items.push({
+     id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+i+'-'+Math.random(),
+     file:f,name:f.name,size:f.size,url:imageData||URL.createObjectURL(f),imageData,
+     status:'queued',classification:'queued',reason:'Waiting to be processed.',
+     text:'',rawText:'',repairedText:'',finalText:'',error:'',repairs:[],validationWarnings:[],history:[],
+     primaryAttempts:0,secondaryAttempts:0,failures:0,lastError:'',truncated:false,stopReason:'',
+     viewMode:'final',compareOpen:false,editingSnapshotTaken:false
+   });
+ }
+ scheduleAutosave(); render();
 }
 els.drop.onclick=()=>els.files.click();
 els.files.onchange=e=>addFiles(e.target.files);
@@ -337,7 +417,6 @@ function repairLatexForMathJax(input){
 function latexStructuralWarnings(input){
  const t=String(input??'');
  const warnings=[];
-
  const count=(re)=>(t.match(re)||[]).length;
  const op=count(/\\\(/g), cp=count(/\\\)/g);
  const ob=count(/\\\[/g), cb=count(/\\\]/g);
@@ -346,21 +425,27 @@ function latexStructuralWarnings(input){
  if(ob!==cb) warnings.push(`unbalanced \\\\[ \\\\] (${ob} vs ${cb})`);
  if(dd%2!==0) warnings.push('unbalanced $$ delimiters');
 
- // Only brace-check recognized math spans, not ordinary prose.
- for(const seg of mathSegments(t)){
+ const segs=mathSegments(t);
+ for(const seg of segs){
+   const s=seg.text;
    let depth=0,bad=false;
-   for(let i=0;i<seg.text.length;i++){
-     if(seg.text[i]==='\\'){i++;continue}
-     if(seg.text[i]==='{') depth++;
-     else if(seg.text[i]==='}'){depth--;if(depth<0){bad=true;break}}
+   for(let i=0;i<s.length;i++){
+     if(s[i]==='\\'){i++;continue}
+     if(s[i]==='{') depth++;
+     else if(s[i]==='}'){depth--;if(depth<0){bad=true;break}}
    }
-   if(bad||depth!==0){warnings.push('unbalanced { } braces inside math');break}
+   if(bad||depth!==0) warnings.push('unbalanced { } braces inside math');
+   if(/\\frac(?!\s*\{[^{}]*\}\s*\{[^{}]*\})/.test(s)) warnings.push('possible malformed \\frac');
+   if(/\\sqrt\s*(?:$|[^\[{])/.test(s)) warnings.push('possible malformed \\sqrt');
+   if(/[\^_]\s*(?:$|[}\])])/.test(s)) warnings.push('incomplete superscript or subscript');
+   if(/\\int\s*_\s*(?:\^|$)|\\int\s*\^\s*(?:_|$)/.test(s)) warnings.push('possible malformed integral bounds');
+   if(s.includes('√')) warnings.push('Unicode radical √ needs scope review; not auto-rewritten');
+   if(/(^|[^\\A-Za-z])(frac|sqrt|infty|partial|theta|alpha|beta|gamma)(?=\s*[\{_^])/.test(s))
+     warnings.push('possible missing command backslash inside math');
  }
-
- // Flag a radical character rather than guessing its scope.
- if(mathSegments(t).some(seg=>seg.text.includes('√')))
-   warnings.push('Unicode radical √ needs scope review; not auto-rewritten');
-
+ const begins=[...t.matchAll(/\\begin\{([^}]+)\}/g)].map(m=>m[1]);
+ const ends=[...t.matchAll(/\\end\{([^}]+)\}/g)].map(m=>m[1]);
+ if(begins.length!==ends.length||begins.some((x,i)=>ends[i]!==x)) warnings.push('mismatched \\begin{} / \\end{} environments');
  return [...new Set(warnings)];
 }
 
@@ -406,7 +491,7 @@ function classifyText(text){
 }
 
 function stats(){
- const counts={total:state.items.length,good:0,review:0,unclear:0,mathunsure:0,failed:0,queued:0,running:0};
+ const counts={total:state.items.length,good:0,review:0,unclear:0,mathunsure:0,approved:0,failed:0,queued:0,running:0};
  state.items.forEach(i=>{
    if(i.status==='running')counts.running++;
    else if(i.status==='queued')counts.queued++;
@@ -422,19 +507,47 @@ function visibleItems(){
  return state.items.filter(i=>i.classification===state.filter || (state.filter==='queued'&&i.status==='queued'));
 }
 function badgeClass(i){return i.status==='running'?'running':i.status==='queued'?'queued':i.classification}
-function badgeLabel(i){return i.status==='running'?'Running':i.status==='queued'?'Queued':({good:'Good',review:'Review',unclear:'Unclear',mathunsure:'Math Unsure',failed:'Failed'})[i.classification]||i.classification}
+function badgeLabel(i){return i.status==='running'?'Running':i.status==='queued'?'Queued':({good:'Good',review:'Review',unclear:'Unclear',mathunsure:'Math Unsure',approved:'Approved',failed:'Failed'})[i.classification]||i.classification}
+function pushRevision(i,label){
+ if(!(i.rawText||i.repairedText||i.finalText||i.text))return;
+ i.history=i.history||[];
+ i.history.push({
+   label:label||'Revision',
+   at:new Date().toISOString(),
+   rawText:i.rawText||'',
+   repairedText:i.repairedText||'',
+   finalText:i.finalText||i.text||'',
+   repairs:[...(i.repairs||[])],
+   validationWarnings:[...(i.validationWarnings||[])],
+   classification:i.classification,
+   reason:i.reason,
+   lastProvider:i.lastProvider,lastModel:i.lastModel,lastPass:i.lastPass,
+   truncated:!!i.truncated,stopReason:i.stopReason||''
+ });
+ if(i.history.length>25)i.history.shift();
+}
+function versionText(i,mode){
+ if(mode==='raw')return i.rawText||'';
+ if(mode==='repaired')return i.repairedText||'';
+ return i.finalText||i.text||'';
+}
 function render(){
  renderStats();
  const list=visibleItems();
  if(!list.length){els.results.innerHTML='<div class="empty">No items in this pile.</div>';return}
- els.results.innerHTML=list.map((i,idx)=>`
+ els.results.innerHTML=(state.autosaveWarning?`<div class="reason"><b>Autosave:</b> ${esc(state.autosaveWarning)}</div>`:'')+list.map(i=>{
+   const mode=i.viewMode||'final';
+   const text=versionText(i,mode);
+   const lastPrev=i.history&&i.history.length?i.history[i.history.length-1]:null;
+   return `
  <section class="panel card">
   <aside class="side">
-   <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}</div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
-   <img class="preview" src="${i.url}" alt="${esc(i.name)}">
+   <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}<div class="small">Attempts: Primary ${i.primaryAttempts||0} · Secondary ${i.secondaryAttempts||0} · Failures ${i.failures||0}</div></div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
+   ${i.url?`<img class="preview" src="${i.url}" alt="${esc(i.name)}">`:'<div class="reason">Original image was not retained by browser autosave. Text/history are still available.</div>'}
    <div class="toolbar">
-    <button onclick="runSingleById('${i.id}')">Run again with Primary</button>
+    ${i.classification==='approved'?'<button onclick="unapprove(\''+i.id+'\')">Unapprove</button>':`<button onclick="runSingleById('${i.id}')">Run again with Primary</button>`}
     ${i.history&&i.history.length?`<button onclick="restorePrevious('${i.id}')">Restore previous</button>`:''}
+    <button onclick="toggleCompare('${i.id}')">Compare versions</button>
     <button onclick="removeById('${i.id}')">Remove</button>
    </div>
    <div class="manual">
@@ -442,37 +555,70 @@ function render(){
     <button onclick="manualClass('${i.id}','review')">Review</button>
     <button onclick="manualClass('${i.id}','unclear')">Unclear</button>
     <button onclick="manualClass('${i.id}','mathunsure')">Math Unsure</button>
+    <button onclick="manualClass('${i.id}','approved')">Approve</button>
     <button onclick="manualClass('${i.id}','failed')">Failed</button>
    </div>
   </aside>
   <div class="main">
-   <b>Extracted text</b>
+   <b>Transcription versions</b>
+   <div class="versionbar">
+    <button class="${mode==='raw'?'active':''}" onclick="setViewMode('${i.id}','raw')">View raw</button>
+    <button class="${mode==='repaired'?'active':''}" onclick="setViewMode('${i.id}','repaired')">View repaired</button>
+    <button class="${mode==='final'?'active':''}" onclick="setViewMode('${i.id}','final')">View final</button>
+   </div>
    ${i.reason?`<div class="reason"><b>Sorting reason:</b> ${esc(i.reason)}</div>`:''}
+   ${i.truncated?`<div class="error"><b>Possible truncated response.</b> Stop reason: ${esc(i.stopReason||'provider reported incomplete output')}.</div>`:''}
+   ${i.validationWarnings&&i.validationWarnings.length?`<div class="reason"><b>LaTeX validation:</b> ${esc(i.validationWarnings.join(' • '))}</div>`:''}
    ${i.repairs&&i.repairs.length?`<div class="reason"><b>LaTeX repair log:</b> ${esc(i.repairs.join(' • '))}</div>`:''}
    ${i.error?`<div class="error">${esc(i.error)}</div>`:''}
-   <textarea class="output" oninput="editText('${i.id}',this.value)" placeholder="Extracted text will appear here.">${esc(i.text)}</textarea>
+   <textarea class="output" ${mode==='final'?'':'readonly'} oninput="${mode==='final'?`editText('${i.id}',this.value)`:''}" placeholder="Extracted text will appear here.">${esc(text)}</textarea>
+   ${i.compareOpen?`<div class="comparebox"><b>Current revision comparison</b><div class="small">Raw AI</div><pre>${esc(i.rawText||'')}</pre><div class="small">Repaired</div><pre>${esc(i.repairedText||'')}</pre><div class="small">Final</div><pre>${esc(i.finalText||i.text||'')}</pre>${lastPrev?`<div class="small">Previous final — ${esc(lastPrev.label||'revision')}</div><pre>${esc(lastPrev.finalText||'')}</pre>`:''}</div>`:''}
+   ${i.history&&i.history.length?`<details class="historybox"><summary>Revision history (${i.history.length})</summary><ol>${i.history.slice().reverse().map(h=>`<li><b>${esc(h.label||'Revision')}</b> · ${esc(h.at?new Date(h.at).toLocaleString():'')} · ${esc(h.classification||'')}</li>`).join('')}</ol></details>`:''}
   </div>
- </section>`).join('');
+ </section>`;
+ }).join('');
 }
+window.setViewMode=(id,mode)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.viewMode=mode;render()};
+window.toggleCompare=id=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.compareOpen=!i.compareOpen;render()};
 window.editText=(id,v)=>{
- const i=state.items.find(x=>x.id===id); if(!i)return; i.text=v;
- if(i.status==='done'){
+ const i=state.items.find(x=>x.id===id); if(!i)return;
+ if(!i.editingSnapshotTaken){pushRevision(i,'Before manual edit');i.editingSnapshotTaken=true}
+ i.finalText=v;i.text=v;
+ if(i.status==='done'&&i.classification!=='approved'){
    const c=classifyText(v);
    i.classification=c.classification;
    i.reason='Reclassified after manual text edit: '+c.reason;
-   renderStats();
+   i.validationWarnings=latexStructuralWarnings(v);
  }
+ scheduleAutosave();renderStats();
 };
-window.manualClass=(id,c)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.classification=c;i.status=c==='failed'?'error':'done';i.reason='Manually assigned to '+c+'.';render()};
+window.manualClass=(id,c)=>{
+ const i=state.items.find(x=>x.id===id);if(!i)return;
+ pushRevision(i,c==='approved'?'Before approval':'Before manual classification');
+ i.classification=c;i.status=c==='failed'?'error':'done';
+ i.reason=c==='approved'?'Human reviewed and approved this page.':'Manually assigned to '+c+'.';
+ if(c==='approved')i.error='';
+ i.editingSnapshotTaken=false;scheduleAutosave();render()
+};
+window.unapprove=id=>{
+ const i=state.items.find(x=>x.id===id);if(!i)return;
+ pushRevision(i,'Approved revision');
+ const c=classifyText(i.finalText||i.text||'');
+ i.classification=c.classification;i.status='done';i.reason='Unapproved for further review. '+c.reason;
+ scheduleAutosave();render();
+};
 window.restorePrevious=id=>{
  const i=state.items.find(x=>x.id===id); if(!i||!i.history||!i.history.length)return;
  const prev=i.history.pop();
- i.text=prev.text;i.repairs=prev.repairs||[];i.classification=prev.classification||'review';
- i.reason=prev.reason||'Restored previous transcription.';
+ i.rawText=prev.rawText||'';i.repairedText=prev.repairedText||'';i.finalText=prev.finalText||'';i.text=i.finalText;
+ i.repairs=prev.repairs||[];i.validationWarnings=prev.validationWarnings||[];
+ i.classification=prev.classification||'review';i.reason=prev.reason||'Restored previous transcription.';
  i.lastProvider=prev.lastProvider;i.lastModel=prev.lastModel;i.lastPass=prev.lastPass;
- i.status='done';i.error='';render();
+ i.truncated=!!prev.truncated;i.stopReason=prev.stopReason||'';
+ i.status=i.classification==='failed'?'error':'done';i.error='';i.editingSnapshotTaken=false;
+ scheduleAutosave();render();
 };
-window.removeById=id=>{const i=state.items.find(x=>x.id===id);if(i)URL.revokeObjectURL(i.url);state.items=state.items.filter(x=>x.id!==id);render()};
+window.removeById=id=>{const i=state.items.find(x=>x.id===id);if(i&&i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url);state.items=state.items.filter(x=>x.id!==id);scheduleAutosave();render()};
 
 function dataURL(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result||''));r.onerror=()=>rej(new Error('Failed to read '+file.name));r.readAsDataURL(file)})}
 function b64(d){return d.split(',')[1]||''}
@@ -486,26 +632,32 @@ function extractGemini(j){return (j?.candidates?.[0]?.content?.parts||[]).map(x=
 function extractCompatible(j){const c=j?.choices?.[0]?.message?.content;if(typeof c==='string')return c.trim();if(Array.isArray(c))return c.map(x=>x?.text||'').filter(Boolean).join('\n\n').trim();return ''}
 
 async function transcribe(item,s){
- const d=await dataURL(item.file), base=b64(d), mime=item.file.type||'image/jpeg';
- let response,j,text='';
+ if(!item.file)throw new Error('Original image is unavailable after restore. Re-add the image before retrying.');
+ const d=item.imageData||await dataURL(item.file), base=b64(d), mime=item.file.type||'image/jpeg';
+ let response,j,text='',truncated=false,stopReason='';
  if(s.provider==='openai'){
    response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+s.apiKey},body:JSON.stringify({model:s.model,input:[{role:'user',content:[{type:'input_text',text:s.prompt},{type:'input_image',image_url:d}]}]})});
    j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'OpenAI request failed.'); text=extractOpenAI(j);
+   stopReason=j?.incomplete_details?.reason||j?.status||''; truncated=j?.status==='incomplete'||/max.*token|length/i.test(stopReason);
  }else if(s.provider==='anthropic'){
    response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':s.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:s.model,max_tokens:4096,temperature:0,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:mime,data:base}},{type:'text',text:s.prompt}]}]})});
    j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'Anthropic request failed.'); text=extractAnthropic(j);
+   stopReason=j?.stop_reason||''; truncated=stopReason==='max_tokens';
  }else if(s.provider==='gemini'){
    const ep=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent?key=${encodeURIComponent(s.apiKey)}`;
    response=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:s.prompt},{inlineData:{mimeType:mime,data:base}}]}],generationConfig:{temperature:0}})});
    j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'Gemini request failed.'); text=extractGemini(j);
+   stopReason=j?.candidates?.[0]?.finishReason||''; truncated=/MAX_TOKENS|TOKEN/i.test(stopReason);
  }else{
    const u=s.baseUrl.replace(/\/$/,''); if(!u)throw new Error('Enter a compatible base URL.');
    response=await fetch(u+'/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+s.apiKey},body:JSON.stringify({model:s.model,messages:[{role:'user',content:[{type:'text',text:s.prompt},{type:'image_url',image_url:{url:d}}]}],temperature:0})});
    j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'Compatible-provider request failed.'); text=extractCompatible(j);
+   stopReason=j?.choices?.[0]?.finish_reason||''; truncated=stopReason==='length';
  }
  if(!text)throw new Error('No text returned by provider.');
- return text;
+ return {text,truncated,stopReason};
 }
+
 function snapPrimary(){return{provider:els.provider.value,model:els.model.value.trim(),apiKey:els.apikey.value.trim(),baseUrl:els.baseurl.value.trim(),prompt:els.prompt.value,pass:'primary'}}
 function snapSecondary(){return{provider:els.provider2.value,model:els.model2.value.trim(),apiKey:els.apikey2.value.trim(),baseUrl:els.baseurl2.value.trim(),prompt:els.prompt.value,pass:'secondary'}}
 
@@ -516,25 +668,35 @@ function snapForChoice(choice){
 function validateSnap(s){if(!s.apiKey){alert(`Enter the ${s.pass||'selected'} AI API key first.`);return false}if(!s.model){alert('Enter a model name.');return false}if(s.provider==='compatible'&&!s.baseUrl){alert('Enter a compatible base URL.');return false}return true}
 
 async function runOne(i,s){
- i.status='running';i.classification='queued';i.reason='Processing…';i.error='';render();
+ if(i.classification==='approved'){return}
+ pushRevision(i,'Before '+(s.pass||'primary')+' retry');
+ if((s.pass||'primary')==='secondary')i.secondaryAttempts=(i.secondaryAttempts||0)+1;
+ else i.primaryAttempts=(i.primaryAttempts||0)+1;
+ i.status='running';i.classification='queued';i.reason='Processing…';i.error='';i.editingSnapshotTaken=false;render();
  try{
-   const rawText=await transcribe(i,s);
+   const result=await transcribe(i,s);
+   const rawText=result.text;
    const repaired=repairLatexForMathJax(rawText);
-   const c=classifyText(repaired.text);
-   if(i.text){
-     i.history=i.history||[];
-     i.history.push({text:i.text,repairs:[...(i.repairs||[])],classification:i.classification,reason:i.reason,lastProvider:i.lastProvider,lastModel:i.lastModel,lastPass:i.lastPass});
-   }
+   let c=classifyText(repaired.text);
+   const validationWarnings=latexStructuralWarnings(repaired.text);
+   if(result.truncated)c={classification:'review',reason:'Possible truncated response; provider indicated output may have stopped early.'};
    i.rawText=rawText;
-   i.text=repaired.text;i.repairs=repaired.repairs;i.status='done';i.classification=c.classification;i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
+   i.repairedText=repaired.text;
+   i.finalText=repaired.text;
+   i.text=i.finalText;i.repairs=repaired.repairs;i.validationWarnings=validationWarnings;
+   i.truncated=!!result.truncated;i.stopReason=result.stopReason||'';
+   i.status='done';i.classification=c.classification;i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
    i.reason=(repaired.repairs.length?`Auto-repaired ${repaired.repairs.length} common LaTeX artifact${repaired.repairs.length===1?'':'s'}. `:'')+c.reason;
-   i.error='';
+   i.error='';i.lastError='';
  }catch(e){
-   i.status='error';i.classification='failed';i.error=e instanceof Error?e.message:String(e);i.reason='The API/browser request failed, so no usable transcription was produced.';
+   i.failures=(i.failures||0)+1;
+   i.status='error';i.classification='failed';i.error=e instanceof Error?e.message:String(e);i.lastError=i.error;
+   i.reason='The API/browser request failed, so no usable transcription was produced.';
  }
- render();
+ scheduleAutosave();render();
 }
-window.runSingleById=async id=>{if(state.running)return;const s=snapPrimary();if(!validateSnap(s))return;const i=state.items.find(x=>x.id===id);if(i)await runOne(i,s)};
+
+window.runSingleById=async id=>{if(state.running)return;const i=state.items.find(x=>x.id===id);if(!i)return;if(i.classification==='approved'){alert('Unapprove this page before retrying it.');return}const s=snapPrimary();if(!validateSnap(s))return;await runOne(i,s)};
 
 async function runList(list,s){
  if(state.running)return;
@@ -549,7 +711,7 @@ async function runList(list,s){
  render();
 }
 $('run').onclick=()=>runList(state.items.filter(i=>i.status==='queued'),snapPrimary());
-$('retry-current-primary').onclick=()=>runList(visibleItems().filter(i=>i.status!=='running'),snapForChoice($('current-ai').value));
+$('retry-current-primary').onclick=()=>runList(visibleItems().filter(i=>i.status!=='running'&&i.classification!=='approved'),snapForChoice($('current-ai').value));
 $('retry-review').onclick=()=>runList(state.items.filter(i=>i.classification==='review'),snapForChoice($('review-ai').value));
 $('retry-unclear').onclick=()=>runList(state.items.filter(i=>i.classification==='unclear'),snapForChoice($('unclear-ai').value));
 $('retry-mathunsure').onclick=()=>runList(state.items.filter(i=>i.classification==='mathunsure'),snapForChoice($('mathunsure-ai').value));
@@ -647,23 +809,26 @@ function exportPdfPile(list,title){
 
 
 $('repair-current').onclick=()=>{
- const list=visibleItems();
+ const list=visibleItems().filter(i=>i.classification!=='approved');
  let changed=0;
  for(const i of list){
-   if(!i.text) continue;
-   const r=repairLatexForMathJax(i.text);
-   if(r.text!==i.text){
-     i.text=r.text;
+   const base=i.finalText||i.text||'';
+   if(!base) continue;
+   const r=repairLatexForMathJax(base);
+   if(r.text!==base){
+     pushRevision(i,'Before manual LaTeX repair');
+     i.repairedText=r.text;i.finalText=r.text;i.text=r.text;
      i.repairs=[...(i.repairs||[]),...r.repairs].filter((v,k,a)=>a.indexOf(v)===k);
      changed++;
    }
-   const c=classifyText(i.text);
+   i.validationWarnings=latexStructuralWarnings(i.finalText||i.text||'');
+   const cl=classifyText(i.finalText||i.text||'');
    if(i.status==='done'){
-     i.classification=c.classification;
-     i.reason=(i.repairs&&i.repairs.length?`LaTeX repair pass applied. `:'')+c.reason;
+     i.classification=cl.classification;
+     i.reason=(i.repairs&&i.repairs.length?`LaTeX repair pass applied. `:'')+cl.reason;
    }
  }
- render();
+ scheduleAutosave();render();
  alert(changed?`Repaired ${changed} item${changed===1?'':'s'} in this pile.`:'No additional safe LaTeX repairs were found in this pile.');
 };
 
@@ -672,10 +837,16 @@ $('pdf-good').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==
 $('pdf-review').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='review'),'Photo-to-Text — Review pile');
 $('pdf-unclear').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='unclear'),'Photo-to-Text — Unclear pile');
 $('pdf-mathunsure').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='mathunsure'),'Photo-to-Text — Math Unsure pile');
+$('pdf-approved').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='approved'),'Photo-to-Text — Approved');
 
-$('clear').onclick=()=>{if(!confirm('Clear all loaded images and results?'))return;state.items.forEach(i=>URL.revokeObjectURL(i.url));state.items=[];render()};
+$('clear').onclick=()=>{if(!confirm('Clear all loaded images and results?'))return;state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});state.items=[];clearAutosave();render()};
 
-loadSettings();render();
+loadSettings();
+restoreProjectState().then(()=>{
+ const active=document.querySelector('#tabs button[data-filter="'+state.filter+'"]');
+ if(active)document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===active));
+ render();
+});
 </script>
 </body>
 </html>
