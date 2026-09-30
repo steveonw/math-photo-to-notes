@@ -1464,9 +1464,13 @@ function retryBatchFailed(pageIds){
  startQueue(eligible,snapForChoice(pass),{kind:'retry-failed',label:'Failed-page retry',showSummary:true});
 }
 function renderQueueStatus(){
- const status=$('queue-status'),pause=$('pause-queue'),concurrency=$('concurrency'),autoStatus=$('auto-routing-status');
+ const status=$('queue-status'),pause=$('pause-queue'),concurrency=$('concurrency'),autoStatus=$('auto-routing-status'),haStatus=$('high-assurance-status'),haCost=$('high-assurance-cost-preview'),haToggle=$('high-assurance'),haPolicy=$('high-assurance-policy');
  if(concurrency)concurrency.disabled=!!state.running;
+ if(haToggle)haToggle.disabled=!!state.running;
+ if(haPolicy)haPolicy.disabled=!!state.running;
  if(autoStatus)autoStatus.textContent=autoRoutingEnabled()?'On · max '+autoMaxAttempts()+' · '+(autoCachePolicy()==='fresh'?'fresh calls':'cache allowed'):'Off';
+ if(haStatus)haStatus.textContent=highAssuranceEnabled()?'On · '+highAssurancePolicyLabel()+' · verifier: Secondary':'Off';
+ if(haCost)haCost.textContent=highAssuranceCostPreview();
  if(pause){
    pause.textContent=state.queuePaused?'Resume queue':'Pause queue';
    pause.disabled=!state.queuePlan;
@@ -1477,8 +1481,8 @@ function renderQueueStatus(){
  const done=jobs.filter(j=>j.state==='done').length;
  const running=jobs.filter(j=>j.state==='running').length;
  const pending=jobs.filter(j=>j.state==='pending').length;
- const autoJobs=jobs.filter(j=>j.autoRoute).length;
- status.textContent=(state.queuePaused?'Paused':'Queue')+': '+done+'/'+jobs.length+' done · '+running+' running · '+pending+' pending'+(autoJobs?' · '+autoJobs+' auto':'')+(state.queuePlan.pauseReason?' · '+state.queuePlan.pauseReason:'');
+ const autoJobs=jobs.filter(j=>j.autoRoute).length,haJobs=jobs.filter(j=>j.highAssuranceVerify).length;
+ status.textContent=(state.queuePaused?'Paused':'Queue')+': '+done+'/'+jobs.length+' done · '+running+' running · '+pending+' pending'+(autoJobs?' · '+autoJobs+' auto':'')+(haJobs?' · '+haJobs+' assurance':'')+(state.queuePlan.pauseReason?' · '+state.queuePlan.pauseReason:'');
 }
 function render(){
  renderStats();
@@ -2073,6 +2077,106 @@ window.runRegionComparison=async(pageId,regionId)=>{
  const page=state.items.find(x=>x.id===pageId),region=page?.regions?.find(x=>x.id===regionId);if(page&&region){updateRegionDisagreement(page,region);scheduleAutosave();render()}
 };
 
+function highAssuranceVerifierPrompt(basePrompt){
+ return 'Independently transcribe the original page image from scratch as a verification reading. You are NOT being shown the Primary transcription and must not assume or reconstruct it. Preserve mathematical structure exactly, use the project uncertainty markers when warranted, and return only the transcription.\n\nProject transcription rules:\n'+String(basePrompt||'');
+}
+async function maybeAppendHighAssuranceVerification(plan,item,job,result){
+ if(!plan?.highAssuranceAtStart||job?.highAssuranceVerify||job?.autoRoute||job?.pass!=='primary'||result?.outcome!=='done')return false;
+ const policy=plan.highAssurancePolicy||'heavy',elig=highAssuranceEligibility(item,policy);
+ item.highAssuranceTrigger={at:new Date().toISOString(),policy,eligible:elig.eligible,score:elig.profile.score,signals:[...elig.profile.signals],reason:elig.reason};
+ if(!elig.eligible){
+   item.highAssuranceStatus='not-triggered';
+   item.highAssuranceNote='High Assurance was enabled, but this Good page did not match the '+highAssurancePolicyLabel(policy)+' verification policy.';
+   return false;
+ }
+ const primaryText=item.finalText||item.text||'',primaryTextHash=await sha256Hex(primaryText);
+ const snap=state.queueRuntimeSnaps?.secondary||snapSecondary();
+ plan.jobs.push({
+   id:item.id,state:'pending',pass:'secondary',forceFresh:true,autoRoute:false,highAssuranceVerify:true,kind:'high-assurance',
+   primaryTextHash,triggerSignals:[...elig.profile.signals],triggerScore:elig.profile.score,policy,
+   createdAt:new Date().toISOString()
+ });
+ item.highAssuranceStatus='queued';
+ item.highAssuranceNote='High Assurance queued an independent Secondary re-read because: '+(elig.profile.signals.join(', ')||elig.reason)+'. Primary text will not be replaced automatically.';
+ recordRoutingEvent(item,{action:'assurance-queued',from:'good',pass:'secondary',provider:snap.provider||'',model:snap.model||'',reason:item.highAssuranceNote,signature:'high-assurance:'+primaryTextHash});
+ return true;
+}
+async function runHighAssuranceVerification(item,s,job){
+ const key='high-assurance:'+item.id+':'+(crypto.randomUUID?crypto.randomUUID():Date.now());
+ const controller=new AbortController();state.activeControllers.set(key,controller);
+ item.highAssuranceAttempts=Number(item.highAssuranceAttempts||0)+1;
+ item.highAssuranceStatus='running';
+ item.highAssuranceNote='High Assurance is independently re-reading this page with the Secondary AI. Primary final text remains unchanged.';
+ scheduleAutosave();render();
+ const verifierSnap={...s,prompt:highAssuranceVerifierPrompt(s.prompt)};
+ const startedAt=new Date().toISOString();
+ try{
+   let result=null,retryIndex=0;
+   while(true){
+     try{
+       await waitWhileQueuePaused(controller.signal);
+       result=await transcribeWithTimeout(item,verifierSnap,controller.signal);
+       break;
+     }catch(e){
+       if(controller.signal.aborted)throw controller.signal.reason||new DOMException('Cancelled','AbortError');
+       if(!isTransientError(e)||retryIndex>=MAX_TRANSIENT_RETRIES)throw e;
+       const delay=transientDelayMs(e,retryIndex);retryIndex++;
+       item.highAssuranceNote='Temporary verifier/provider failure; retrying in '+Math.ceil(delay/1000)+'s ('+retryIndex+'/'+MAX_TRANSIENT_RETRIES+').';
+       scheduleAutosave();render();await sleepWithSignal(delay,controller.signal);
+     }
+   }
+   const rawText=String(result.text||''),repaired=repairLatexForMathJax(rawText),quality=classifyText(repaired.text);
+   const currentText=item.finalText||item.text||'',currentHash=await sha256Hex(currentText);
+   const comparison=compareHighAssuranceTexts(currentText,repaired.text);
+   const verifierWarnings=latexStructuralWarnings(repaired.text);
+   const verifierConcern=!!result.truncated||quality.classification!=='good'||verifierWarnings.length>0||comparison.disagree;
+   const stale=!!job.primaryTextHash&&currentHash!==job.primaryTextHash;
+   const rec={
+     id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random(),
+     at:new Date().toISOString(),startedAt,batchId:state.queuePlan?.id||item.lastBatchId||'',
+     policy:job.policy||'heavy',triggerSignals:[...(job.triggerSignals||[])],triggerScore:Number(job.triggerScore||0),
+     provider:s.provider,model:s.model,pass:'secondary',promptFingerprint:await sha256Hex(verifierSnap.prompt||''),
+     primaryTextHash:job.primaryTextHash||'',currentPrimaryTextHash:currentHash,
+     rawText,repairedText:repaired.text,repairs:repaired.repairs,validationWarnings:verifierWarnings,
+     verifierClassification:quality.classification,verifierReason:quality.reason,
+     truncated:!!result.truncated,stopReason:result.stopReason||'',usage:result.usage||null,
+     comparison,stale,outcome:stale?'stale':(verifierConcern?'review':'verified')
+   };
+   item.highAssuranceChecks=item.highAssuranceChecks||[];item.highAssuranceChecks.push(rec);if(item.highAssuranceChecks.length>50)item.highAssuranceChecks.shift();
+   item.usageLog=item.usageLog||[];item.usageLog.push({at:rec.at,scope:'high-assurance',pass:'secondary',provider:s.provider,model:s.model,usage:result.usage||null,cached:false});if(item.usageLog.length>100)item.usageLog.shift();
+   recordRoutingEvent(item,{action:stale?'assurance-stale':(verifierConcern?'assurance-review':'assurance-verified'),from:'good',pass:'secondary',provider:s.provider,model:s.model,reason:stale?'Primary text changed before verifier comparison; verifier result was preserved but not applied.':(verifierConcern?'High Assurance found a material disagreement or verifier warning; Primary text was preserved for human review.':'Independent Secondary reading agreed with the Primary within the deterministic comparison policy.'),signature:'high-assurance:'+(job.primaryTextHash||'')});
+   if(stale){
+     item.highAssuranceStatus='stale';item.highAssuranceNote='Verifier completed, but the Primary final text changed after verification was queued. Result was preserved without changing page state.';
+     return {outcome:'stale-verification',classification:item.classification,stale:true};
+   }
+   if(verifierConcern){
+     item.highAssuranceStatus='review';
+     item.highAssuranceNote='High Assurance found a disagreement or verifier warning. No winner was selected; Primary final text is still shown and the independent verifier reading is preserved below.';
+     if(item.classification==='good'){
+       item.classification='review';item.status='done';
+       item.reason='High Assurance independent Secondary reading disagreed with the Primary or raised a math/structure warning. No transcription was selected automatically.';
+     }
+     return {outcome:'verification-review',classification:item.classification,disagreement:true};
+   }
+   item.highAssuranceStatus='verified';
+   item.highAssuranceNote='High Assurance verified this Good page with an independent Secondary re-read. No final text was replaced.';
+   if(item.classification==='good')item.reason='No automatic warning signs detected. High Assurance independent Secondary reading agreed within the deterministic comparison policy.';
+   return {outcome:'verified',classification:item.classification,verified:true};
+ }catch(e){
+   const cancelled=controller.signal.aborted||e?.name==='AbortError';
+   const rec={id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random(),at:new Date().toISOString(),startedAt,batchId:state.queuePlan?.id||item.lastBatchId||'',policy:job.policy||'heavy',triggerSignals:[...(job.triggerSignals||[])],triggerScore:Number(job.triggerScore||0),provider:s.provider,model:s.model,pass:'secondary',primaryTextHash:job.primaryTextHash||'',outcome:cancelled?'cancelled':'failed',error:e instanceof Error?e.message:String(e)};
+   item.highAssuranceChecks=item.highAssuranceChecks||[];item.highAssuranceChecks.push(rec);if(item.highAssuranceChecks.length>50)item.highAssuranceChecks.shift();
+   item.highAssuranceStatus=cancelled?'cancelled':'review';
+   item.highAssuranceNote=cancelled?'High Assurance verification was cancelled; Primary transcription was preserved.':'High Assurance verification could not complete; Primary transcription was preserved and human review is required.';
+   if(!cancelled&&item.classification==='good'){
+     item.classification='review';item.status='done';item.reason='High Assurance verification failed before independent confirmation. Primary transcription was preserved for human review.';
+   }
+   return {outcome:cancelled?'cancelled-verification':'verification-failed',classification:item.classification,error:rec.error};
+ }finally{
+   state.activeControllers.delete(key);scheduleAutosave();render();
+ }
+}
+
 async function runOne(i,s,{forceFresh=false}={}){
  if(i.classification==='approved')return {outcome:'skipped'};
  if(i.status==='running')return {outcome:'skipped'};
@@ -2201,8 +2305,10 @@ function startQueue(list,s,options={}){
  if(!list.length){alert('There are no items in this pile to process.');return}
  if(!s)s=snapPrimary();
  const passForItem=typeof options.passForItem==='function'?options.passForItem:(()=>s.pass||'primary');
+ const highAssuranceAtStart=highAssuranceEnabled()&&(options.kind||'manual')==='process';
  const candidatePasses=[...new Set(list.map(i=>passForItem(i)).filter(x=>x==='primary'||x==='secondary'))];
  if(!candidatePasses.length)candidatePasses.push(s.pass||'primary');
+ if(highAssuranceAtStart&&!candidatePasses.includes('secondary'))candidatePasses.push('secondary');
  for(const pass of candidatePasses){if(!validateSnap(snapForChoice(pass)))return}
  const seen=new Set();
  const jobs=[];
@@ -2218,7 +2324,7 @@ function startQueue(list,s,options={}){
  state.queuePlan={
    id,pass:s.pass||'primary',provider:s.provider,model:s.model,createdAt:new Date().toISOString(),jobs,
    pageIds:[...seen],kind:options.kind||'manual',label:options.label||'Batch',showSummary:!!options.showSummary,
-   autoFixAtStart:autoRoutingEnabled(),highAssuranceAtStart:!!$('high-assurance')?.checked
+   autoFixAtStart:autoRoutingEnabled(),highAssuranceAtStart,highAssurancePolicy:highAssuranceAtStart?highAssurancePolicy():''
  };
  refreshQueueRuntimeSnaps();state.queueRuntimeSnap=s;state.queueRuntimeSnaps[s.pass||'primary']=s;state.queuePaused=false;state.cancelRequested=false;state.running=true;
  queueButtonsDisabled(true);scheduleAutosave();render();pumpQueue();
@@ -2327,19 +2433,25 @@ function pumpQueue(){
    const jobSnap=snapForQueueJob(job,plan);
    const configError=snapValidationMessage(jobSnap);
    if(configError){
-     state.queuePaused=true;plan.pauseReason=configError;item.autoRoutingNote=job.autoRoute?'Automatic route paused: '+configError:item.autoRoutingNote;
+     state.queuePaused=true;plan.pauseReason=configError;
+     if(job.highAssuranceVerify)item.highAssuranceNote='High Assurance paused: '+configError;
+     else item.autoRoutingNote=job.autoRoute?'Automatic route paused: '+configError:item.autoRoutingNote;
      scheduleAutosave();render();break
    }
    job.state='running';job.startedAt=new Date().toISOString();job.provider=jobSnap.provider;job.model=jobSnap.model;active++;
-   item.lastBatchId=plan.id||'';item.lastAutoFixEnabled=!!plan.autoFixAtStart;item.lastHighAssurance=!!plan.highAssuranceAtStart;
+   item.lastBatchId=plan.id||'';item.lastAutoFixEnabled=!!plan.autoFixAtStart;item.lastHighAssurance=!!plan.highAssuranceAtStart;item.lastHighAssurancePolicy=plan.highAssurancePolicy||'';
    scheduleAutosave();renderQueueStatus();
-   runOne(item,jobSnap,{forceFresh:!!job.forceFresh}).then(result=>{
+   const runner=job.highAssuranceVerify?runHighAssuranceVerification(item,jobSnap,job):runOne(item,jobSnap,{forceFresh:!!job.forceFresh});
+   runner.then(async result=>{
      if(state.queuePlan!==plan)return;
      job.state='done';job.finishedAt=new Date().toISOString();job.outcome=result?.outcome||'done';
      if(job.autoRoute){
        recordRoutingEvent(item,{action:'completed',from:job.fromClassification||'',pass:job.pass||'',provider:job.provider||'',model:job.model||'',reason:'Automatic route completed with '+(item.classification||result?.classification||'unknown')+'.',signature:job.signature||''});
      }
-     maybeAppendAutomaticRoute(plan,item,job,result);
+     if(!job.highAssuranceVerify){
+       await maybeAppendHighAssuranceVerification(plan,item,job,result);
+       maybeAppendAutomaticRoute(plan,item,job,result);
+     }
      scheduleAutosave();
      if(!finishQueueIfDone())pumpQueue();
    }).catch(e=>{
@@ -2377,7 +2489,7 @@ function cancelQueue(){
 $('run').onclick=()=>startQueue(
  state.items.filter(i=>i.status==='queued'||i.status==='interrupted'),
  snapPrimary(),
- {kind:'process',label:autoRoutingEnabled()?'Batch with Auto-fix':'Quick Transcribe',showSummary:true}
+ {kind:'process',label:autoRoutingEnabled()&&highAssuranceEnabled()?'Batch with Auto-fix + High Assurance':(highAssuranceEnabled()?'High Assurance Batch':(autoRoutingEnabled()?'Batch with Auto-fix':'Quick Transcribe')),showSummary:true}
 );
 $('pause-queue').onclick=()=>state.queuePaused?resumeQueue():pauseQueue();
 $('cancel-batch').onclick=()=>cancelQueue();
