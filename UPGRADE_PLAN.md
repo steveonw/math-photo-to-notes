@@ -944,13 +944,30 @@ Implemented behavior:
 
 ## Phase G — Advanced AI Review
 
-1. equation-only second pass
+**Status:** Implemented in Upgrade 9 on 2026-09-30.
+
+1. equation/region-only second pass
 2. model disagreement detection
-3. optional dual-model transcription
+3. optional Primary/Secondary region comparison
 4. targeted crop reprocessing
 5. region-level provenance
 6. dependency tracking
-7. Needs Refresh state for downstream text affected by a targeted re-analysis
+7. Needs Refresh state for downstream text affected by targeted re-analysis
+
+Implemented behavior:
+
+- crop selection is visual and uses the original unrotated source image
+- a region may be linked to selected final-transcription text
+- targeted results never overwrite page text automatically
+- reviewer explicitly chooses a preferred result
+- differing latest Primary/Secondary region results are flagged as Model disagreement
+- the application never selects a winner automatically
+- preferred results that differ from linked final text produce Needs Refresh
+- Apply preferred replaces only the linked span and preserves page revision history
+- Keep current records a human decision without rewriting final text
+- detached anchors remain visibly unresolved
+- whole-page retry remains available
+- targeted result provenance includes provider/model/pass, crop hash, page-text hash, stop/truncation metadata, validation, and event history
 
 Do not recompute an entire page when only one region needs another pass unless the user requests it.
 
@@ -978,7 +995,7 @@ Avoid autonomous multi-agent orchestration where deterministic application logic
 
 # Current Implementation Snapshot
 
-As of 2026-09-30, Upgrades 1–8 are implemented or substantially implemented in `photo_to_text.html`.
+As of 2026-09-30, Upgrades 1–9 are implemented or substantially implemented in `photo_to_text.html`.
 
 Current architecture includes:
 
@@ -1010,10 +1027,19 @@ Current architecture includes:
 - visible routing history
 - fresh-call vs exact-cache automatic retry policy
 - automatic queue pause when routed credentials are unavailable
+- visual equation/region crop selection
+- targeted Primary and Secondary crop retries
+- targeted transient retry/backoff and cancellation
+- model-disagreement detection without automatic winner selection
+- region-level provenance/event history
+- text-span dependency anchors and re-anchoring
+- Needs Refresh state and pile
+- explicit Apply preferred / Keep current dependency resolution
+- approval-lineage preservation after targeted changes
 
 A stale duplicated HTML tail discovered during Upgrade 7 was removed so the repository again contains one canonical HTML document.
 
-The next active development target is **Upgrade 9 — Equation/Region Review + Needs Refresh**.
+The next active development target is **Upgrade 10 — Export / Archive / Review Packages**.
 
 ---
 
@@ -1108,21 +1134,47 @@ Implemented capabilities:
 ### Upgrade 9
 Equation/region-only retries + model disagreement checking + dependency/Needs Refresh tracking.
 
+**Status:** Implemented on 2026-09-30.
+
+Implemented capabilities:
+
+- visual targeted crop picker on the unrotated original image
+- crop coordinates and crop hash persisted per region
+- optional dependency link to selected final-transcription text
+- Primary targeted retry
+- Secondary targeted retry
+- concurrent Primary + Secondary targeted comparison
+- targeted requests reuse timeout, cancellation, transient retry, Retry-After, and exponential backoff logic
+- latest Primary/Secondary targeted results are compared conservatively
+- differing results create Model disagreement and never auto-select a winner
+- each result stores provider/model/pass, raw/repaired text, repair/validation information, stop/truncation data, usage metadata, crop hash, and source page-text hash
+- per-region provenance/event history
+- explicit preferred-result selection
+- preferred result never changes page text automatically
+- linked mismatch creates Needs Refresh
+- explicit Apply preferred updates only the linked final-text span and preserves revision history
+- explicit Keep current resolves the dependency without rewriting the page
+- text edits and whole-page retries re-anchor/recompute region dependencies
+- detached dependencies remain unresolved
+- Approved-page lineage is preserved so changed text requires reapproval
+- automatic whole-page routing does not consume Needs Refresh pages
+
+Current limitation: targeted in-flight requests are cancellable but are not themselves durable queue jobs across reload; completed region results and provenance are persisted.
+
+### Upgrade 10
+Full archive/export system + portable review packages + usage/cost reporting.
+
 **Status:** Next active milestone.
 
 Planned scope:
 
-- targeted equation/region crop retries
-- preserve whole-page retry
-- region-level source/provenance
-- optional Primary/Secondary comparison
-- model-disagreement routing to Review
-- dependency tracking between region result and page transcription
-- Needs Refresh state when targeted re-analysis changes downstream content
-- no automatic choice between disagreeing model answers
-
-### Upgrade 10
-Full archive/export system + portable review packages + usage/cost reporting.
+- explicit versioned project Save/Open
+- archive/ZIP export including original images and transcription lineage
+- portable per-page and per-region review packages
+- Markdown / plain-text / LaTeX export expansion
+- usage summary and user-configurable cost estimation
+- provenance/audit manifest
+- never include API keys in exported artifacts
 
 ---
 
