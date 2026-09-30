@@ -1065,6 +1065,31 @@ A stale duplicated HTML tail discovered during Upgrade 7 was removed so the repo
 
 The numbered Upgrade 1–10 roadmap is complete. Remaining work is tracked as hardening and optional high-accuracy follow-up.
 
+## Post-roadmap critical hardening hotfix — 2026-09-30
+
+A real browser execution test found that the dynamic missing-backslash repair regex in `repairMathSpan` was over-escaped. The regex constructor threw on ordinary delimited math, which could turn a successful paid transcription into a misleading Failed result.
+
+Implemented hotfix:
+
+- correct dynamic RegExp escaping
+- correct single-backslash LaTeX command insertion
+- raw provider text persisted before repair/validation/classification
+- exact-result cache populated before post-processing
+- usage/provenance recorded before post-processing
+- local post-processing failures become Review with raw output preserved
+- automatic AI rerouting blocked for local post-processing failures
+- Gemini API key moved from query string to `x-goog-api-key` header
+- MathJax CDN reference pinned to `3.2.2`
+- new Playwright/Chromium browser smoke suite
+- GitHub Actions browser regression gate on main and pull requests
+- explicit math fixtures for exponent, radical, fraction, sqrt, theta/subscript, and function syntax
+- mocked end-to-end math provider response through the normal Process Batch path
+- forced post-processing-crash fixture verifying raw-result preservation
+
+Release rule going forward:
+
+**No transcription/math-path change is complete until the browser smoke suite executes successfully. A parse-only syntax check is not sufficient.**
+
 ---
 
 # PART 15 — Recommended Build Order
@@ -1097,7 +1122,7 @@ Live MathJax preview + stronger EquationWright validation.
 
 Implemented capabilities include source/preview editing, on-demand MathJax rendering, structured math-warning categories, approximate source snippets, and structured Math Unsure display.
 
-**Security follow-up:** live preview currently loads MathJax on demand in the main application page. Before production hardening, consider bundling/self-hosting MathJax so a third-party remote script is not executed on a page where API keys may be entered.
+**Security follow-up:** live preview currently loads MathJax on demand in the main application page. The CDN reference is now pinned to MathJax 3.2.2 rather than a floating major tag. Before production hardening, still consider bundling/self-hosting MathJax so a third-party remote script is not executed on a page where API keys may be entered.
 
 ### Upgrade 5
 Side-by-side guided review + anchored flags + Needs Reapproval behavior.
@@ -1224,7 +1249,7 @@ Recommended follow-up backlog:
 
 1. durable queue jobs for targeted-region requests
 2. future-schema migration framework
-3. larger checked-in regression fixture corpus
+3. expand the checked-in browser regression corpus beyond the current core math/provider happy-path fixtures
 4. self-host/bundle MathJax
 5. optional independent Math Verifier workflow
 6. streaming/compressed archive support for very large projects
