@@ -874,14 +874,22 @@ The known semantic bug `√x → \\sqrt{}x` must remain a permanent regression t
 
 ## Phase B — AI Routing
 
+**Status:** Implemented through Upgrade 8 on 2026-09-30.
+
 1. Primary/Secondary configuration
 2. per-pile AI choice
-3. automatic secondary routing toggle
-4. retry limits
-5. model history
+3. opt-in automatic problem routing
+4. bounded total processing attempts
+5. per-page routing history
 6. provider error handling
 7. rate-limit/backoff handling
 8. cache bypass/fresh-pass controls
+9. repeated-route signature protection
+10. durable mixed Primary/Secondary queue jobs
+11. credential-aware pause/resume for pending automatic routes
+12. Approved / Needs Reapproval protection
+
+Automatic routing is off by default and never performs human approval.
 
 ## Phase C — Math Review
 
@@ -970,7 +978,7 @@ Avoid autonomous multi-agent orchestration where deterministic application logic
 
 # Current Implementation Snapshot
 
-As of 2026-09-30, Upgrades 1–7 are implemented or substantially implemented in `photo_to_text.html`.
+As of 2026-09-30, Upgrades 1–8 are implemented or substantially implemented in `photo_to_text.html`.
 
 Current architecture includes:
 
@@ -995,10 +1003,17 @@ Current architecture includes:
 - explicit-only page-number suggestions
 - document-scoped Guided Review
 - document-specific Markdown/PDF export groundwork
+- opt-in automatic Review / Unclear / Math Unsure / eligible Failed routing
+- durable queue jobs with per-job Primary/Secondary pass
+- 2–4 total processing-attempt limits
+- repeated classification→AI route loop protection
+- visible routing history
+- fresh-call vs exact-cache automatic retry policy
+- automatic queue pause when routed credentials are unavailable
 
 A stale duplicated HTML tail discovered during Upgrade 7 was removed so the repository again contains one canonical HTML document.
 
-The next active development target is **Upgrade 8 — Automatic Primary/Secondary Routing**.
+The next active development target is **Upgrade 9 — Equation/Region Review + Needs Refresh**.
 
 ---
 
@@ -1071,23 +1086,40 @@ Page-number suggestions never reorder pages automatically.
 ### Upgrade 8
 Automatic Primary/Secondary routing using the hardened processing engine.
 
+**Status:** Implemented on 2026-09-30.
+
+Implemented capabilities:
+
+- automatic routing is opt-in and off by default
+- Review / Unclear / Math Unsure use their existing independent Primary/Secondary selector
+- selected non-transient Failed cases may route through the Failed selector
+- each automatic route is appended as a durable queue job rather than recursively invoking AI
+- queue jobs carry their own Primary/Secondary pass
+- maximum total processing attempts per page is configurable from 2–4
+- repeated `classification → AI slot` signatures are blocked
+- automatic routes retain visible queued/completed/stopped/cancelled history
+- Approved and Needs Reapproval are protected
+- automatic routing never approves a page
+- automatic retry can require a fresh AI call or allow an exact cached result
+- missing credentials/configuration for a pending routed job pause the queue rather than causing transcription failure
+- turning automation off cancels pending automatic route jobs but does not abort an already-running request
+- restored durable queues retain mixed Primary/Secondary route jobs
+
+### Upgrade 9
+Equation/region-only retries + model disagreement checking + dependency/Needs Refresh tracking.
+
 **Status:** Next active milestone.
 
 Planned scope:
 
-- opt-in automatic routing for Review / Unclear / Math Unsure / eligible failure recovery
-- preserve independent per-pile Primary/Secondary choice
-- route through the durable queue instead of ad-hoc recursive calls
-- maximum total AI attempts per page
-- cycle/loop prevention
-- visible routing history and reason
-- Approved-page protection
-- no automatic approval
-- explicit cache-vs-fresh retry policy
-- pause/resume/cancel remains authoritative
-
-### Upgrade 9
-Equation/region-only retries + model disagreement checking + dependency/Needs Refresh tracking.
+- targeted equation/region crop retries
+- preserve whole-page retry
+- region-level source/provenance
+- optional Primary/Secondary comparison
+- model-disagreement routing to Review
+- dependency tracking between region result and page transcription
+- Needs Refresh state when targeted re-analysis changes downstream content
+- no automatic choice between disagreeing model answers
 
 ### Upgrade 10
 Full archive/export system + portable review packages + usage/cost reporting.
