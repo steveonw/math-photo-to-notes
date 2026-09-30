@@ -1,0 +1,144 @@
+{
+  "schema": "math-photo-notes-regression-fixtures-v1",
+  "repair": [
+    {
+      "name": "preserve unscoped unicode radical",
+      "input": "$√x$",
+      "expected": "$√x$"
+    },
+    {
+      "name": "restore braced frac command",
+      "input": "$frac{a}{b}$",
+      "expected": "$\\frac{a}{b}$"
+    },
+    {
+      "name": "restore braced sqrt command",
+      "input": "$sqrt{x+1}$",
+      "expected": "$\\sqrt{x+1}$"
+    },
+    {
+      "name": "restore theta before subscript",
+      "input": "$theta_1$",
+      "expected": "$\\theta_1$"
+    },
+    {
+      "name": "restore sin before parenthesis",
+      "input": "$sin(x)$",
+      "expected": "$\\sin(x)$"
+    },
+    {
+      "name": "normalize unicode minus only in math",
+      "input": "words − stay prose; $x−1$",
+      "expected": "words − stay prose; $x-1$"
+    },
+    {
+      "name": "convert multiplication symbol in math",
+      "input": "$2×x$",
+      "expected": "$2\\times x$"
+    },
+    {
+      "name": "preserve ordinary prose command word",
+      "input": "The sum of the terms is described in prose.",
+      "expected": "The sum of the terms is described in prose."
+    }
+  ],
+  "classification": [
+    {
+      "name": "explicit no readable text",
+      "input": "[No readable text found]",
+      "expected": "unclear"
+    },
+    {
+      "name": "math unsure marker",
+      "input": "[MATH_UNSURE: seen=\"?\" guess=\"$x$\" note=\"symbol\"] (I think it says: $x$)",
+      "expected": "mathunsure"
+    },
+    {
+      "name": "unclear marker",
+      "input": "This line has an [unclear] word in otherwise readable notes.",
+      "expected": "unclear"
+    },
+    {
+      "name": "short response",
+      "input": "Only three words",
+      "expected": "review"
+    },
+    {
+      "name": "ordinary complete transcription",
+      "input": "This ordinary transcription contains enough readable words to pass the suspicious-success length check.",
+      "expected": "good"
+    }
+  ],
+  "validation": [
+    {
+      "name": "unbalanced inline delimiter",
+      "input": "\\(x+1",
+      "minWarnings": 1
+    },
+    {
+      "name": "unbalanced display delimiter",
+      "input": "\\[x+1",
+      "minWarnings": 1
+    },
+    {
+      "name": "malformed fraction",
+      "input": "$\\frac{1}$",
+      "minWarnings": 1
+    },
+    {
+      "name": "balanced fraction",
+      "input": "$\\frac{1}{2}$",
+      "minWarnings": 0
+    }
+  ],
+  "assurance": [
+    {
+      "name": "identical math",
+      "primary": "Value: $\\frac{1}{2}$",
+      "verifier": "Value: $\\frac{1}{2}$",
+      "disagree": false
+    },
+    {
+      "name": "delimiter-only variation",
+      "primary": "Value: $\\frac{1}{2}$",
+      "verifier": "Value: \\( \\frac{1}{2} \\)",
+      "disagree": false
+    },
+    {
+      "name": "sign disagreement",
+      "primary": "Result: $x-1$",
+      "verifier": "Result: $x+1$",
+      "disagree": true
+    },
+    {
+      "name": "exponent disagreement",
+      "primary": "Result: $x^2+1$",
+      "verifier": "Result: $x^3+1$",
+      "disagree": true
+    }
+  ],
+  "pageNumber": [
+    {
+      "name": "filename page label",
+      "item": {
+        "name": "lecture-page-012.jpg",
+        "metadata": {
+          "pageNumber": ""
+        },
+        "finalText": ""
+      },
+      "expected": "12"
+    },
+    {
+      "name": "explicit transcription page label",
+      "item": {
+        "name": "lecture.jpg",
+        "metadata": {
+          "pageNumber": ""
+        },
+        "finalText": "Page 27\nThese are lecture notes with enough text."
+      },
+      "expected": "27"
+    }
+  ]
+}
