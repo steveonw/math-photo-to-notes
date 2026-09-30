@@ -220,6 +220,131 @@ try{
     await context.close();
   }
 
+  // Release C: external-AI packages use stable IDs and imported proposals cannot change text before human acceptance.
+  {
+    anthropicResponse='Only a few words';
+    anthropicCalls=0;
+    const {context,page}=await newPage();
+    await addFixture(page,'external-review.png');
+    const before=await processOne(page);
+    assert(before.badge==='Review','External-review fixture should begin in Review');
+
+    const packageCheck=await page.evaluate(async()=>{
+      const item=state.items[0];
+      const pkg={id:'pkg-ci-1',createdAt:new Date().toISOString(),pageIds:[item.id,'expected-missing'],chunkIndex:1,chunkCount:1,scope:'batch'};
+      state.externalReviewExports=[pkg];
+      const entries=await buildExternalReviewPackageEntries(pkg,[item]);
+      const read=name=>{
+        const e=entries.find(x=>x.name===name);
+        return e?new TextDecoder().decode(e.bytes):'';
+      };
+      return {
+        pageId:item.id,
+        names:entries.map(x=>x.name),
+        prompt:read('review-prompt.txt'),
+        template:JSON.parse(read('return-template.json'))
+      };
+    });
+    assert(packageCheck.names.includes('review-prompt.txt')&&packageCheck.names.includes('manifest.json'),'External review package is missing prompt/manifest');
+    assert(packageCheck.template.package_id==='pkg-ci-1','External review return template lost package ID');
+    assert(packageCheck.template.pages[0].page_id===packageCheck.pageId,'External review return template lost stable page ID');
+    assert(!('classification' in packageCheck.template.pages[0]),'External review template must not ask the outside AI for classification');
+
+    const corrected='The derivative of $x^3$ is $3x^2$, and this corrected transcription contains enough words for a normal good classification.';
+    const importResult=await page.evaluate(({id,corrected})=>{
+      const response='Here are the corrections you requested.\n\n```json\n'+JSON.stringify({
+        package_id:'pkg-ci-1',
+        pages:[
+          {page_id:id,corrected_text:corrected,note:'Corrected the exponent.',classification:'approved'},
+          {page_id:'unknown-page',corrected_text:'unknown page',note:''}
+        ]
+      })+'\n```\nDone.';
+      const original=state.items[0].finalText;
+      const originalClass=state.items[0].classification;
+      const session=beginExternalImportFromText(response,'chat-response.txt');
+      return {
+        original,
+        originalClass,
+        finalAfterImport:state.items[0].finalText,
+        classAfterImport:state.items[0].classification,
+        report:session.report,
+        proposal:session.proposals[0]
+      };
+    },{id:packageCheck.pageId,corrected});
+    assert(importResult.finalAfterImport===importResult.original,'Import changed final text before human acceptance');
+    assert(importResult.classAfterImport===importResult.originalClass,'Import changed application classification before human acceptance');
+    assert(importResult.report.matched===1&&importResult.report.unknown.length===1&&importResult.report.missingExpected.includes('expected-missing'),'External import report did not identify matched/unknown/missing pages');
+    assert(!('classification' in importResult.proposal),'External classification field leaked into internal proposal state');
+
+    await page.waitForFunction(()=>!document.getElementById('external-review-panel').classList.contains('hidden'),null,{timeout:5000});
+    assert(await page.locator('#external-proposed-text').isEditable()===false,'External proposal should start read-only for mandatory review');
+    const panel=await page.locator('#external-review-panel').innerText();
+    assert(/Diff/i.test(panel)&&/human review required/i.test(panel),'External proposal panel did not show mandatory human diff review');
+
+    await page.click('#external-edit');
+    await page.fill('#external-proposed-text',corrected+' Reviewed edit.');
+    await page.click('#external-accept');
+    await page.waitForFunction(()=>state.items[0].externalCorrections?.some(x=>x.decision==='accepted'),null,{timeout:5000});
+    const accepted=await page.evaluate(()=>({
+      finalText:state.items[0].finalText,
+      classification:state.items[0].classification,
+      history:state.items[0].history.length,
+      correction:state.items[0].externalCorrections.at(-1),
+      sessionStatus:state.externalImportSession.proposals[0].status
+    }));
+    assert(/Reviewed edit\.$/.test(accepted.finalText),'Accepted edited external proposal was not applied');
+    assert(accepted.classification!=='approved','External correction was able to approve a page');
+    assert(accepted.history>0,'Accepted external correction did not preserve the previous revision');
+    assert(accepted.correction.decision==='accepted'&&accepted.sessionStatus==='accepted','Accepted external correction provenance was not recorded');
+    await context.close();
+    anthropicResponse=mathResponse;
+  }
+
+  // Release C: accepting an external correction on an Approved page requires human reapproval.
+  {
+    anthropicResponse=mathResponse;
+    anthropicCalls=0;
+    const {context,page}=await newPage();
+    await addFixture(page,'external-approved.png');
+    const before=await processOne(page);
+    assert(before.badge==='Good','Approved external fixture must begin in Good');
+    const setup=await page.evaluate(()=>{
+      const item=state.items[0];
+      manualClass(item.id,'approved');
+      const pkg={id:'pkg-approved',createdAt:new Date().toISOString(),pageIds:[item.id],chunkIndex:1,chunkCount:1,scope:'batch'};
+      state.externalReviewExports=[pkg];
+      beginExternalImportFromText(JSON.stringify({package_id:'pkg-approved',pages:[{page_id:item.id,corrected_text:(item.finalText||item.text)+' corrected externally',note:'small correction'}]}),'approved-response.json');
+      return {id:item.id};
+    });
+    await page.click('#external-accept');
+    await page.waitForFunction(()=>state.items[0].classification==='needsreapproval',null,{timeout:5000});
+    const result=await page.evaluate(()=>({classification:state.items[0].classification,needsReapproval:state.items[0].needsReapproval,approvalAt:state.items[0].approvalAt}));
+    assert(result.classification==='needsreapproval'&&result.needsReapproval===true,'Accepted external correction did not protect Approved lineage');
+    assert(result.approvalAt,'Original approval timestamp was lost');
+    await context.close();
+  }
+
+  // Release C: rejecting an external proposal preserves current text and records the rejection.
+  {
+    anthropicResponse='Only a few words';
+    anthropicCalls=0;
+    const {context,page}=await newPage();
+    await addFixture(page,'external-reject.png');
+    const before=await processOne(page);
+    const id=await page.evaluate(()=>state.items[0].id);
+    await page.evaluate(id=>{
+      state.externalReviewExports=[{id:'pkg-reject',createdAt:new Date().toISOString(),pageIds:[id],chunkIndex:1,chunkCount:1,scope:'batch'}];
+      beginExternalImportFromText(JSON.stringify({package_id:'pkg-reject',pages:[{page_id:id,corrected_text:'A completely different proposed transcription that should be rejected.',note:'proposal'}]}),'reject-response.json');
+    },id);
+    await page.click('#external-reject');
+    await page.waitForFunction(()=>state.items[0].externalCorrections?.some(x=>x.decision==='rejected'),null,{timeout:5000});
+    const after=await page.evaluate(()=>({finalText:state.items[0].finalText,decision:state.items[0].externalCorrections.at(-1).decision}));
+    assert(after.finalText===before.final,'Rejecting an external proposal changed final text');
+    assert(after.decision==='rejected','Rejected external proposal provenance was not recorded');
+    await context.close();
+    anthropicResponse=mathResponse;
+  }
+
   // Release A: Quick Transcribe must stop after one semantic pass when Auto-fix is off.
   {
     anthropicResponse='Only a few words';
