@@ -202,6 +202,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     <button id="download-txt">Plain text</button>
     <button id="download-tex">LaTeX .tex</button>
     <button id="usage-report">Usage report .json</button>
+    <button id="audit-report">Audit manifest .json</button>
     <label>Primary $/1M input <input id="rate-primary-input" type="number" min="0" step="0.01" value="0"></label>
     <label>Primary $/1M output <input id="rate-primary-output" type="number" min="0" step="0.01" value="0"></label>
     <label>Secondary $/1M input <input id="rate-secondary-input" type="number" min="0" step="0.01" value="0"></label>
@@ -1995,6 +1996,7 @@ async function runA2SelfTests(){
  const usageProbe=usageTokenCounts('openai',{input_tokens:12,output_tokens:7,total_tokens:19});
  test('usage normalization reads input/output tokens',usageProbe.input===12&&usageProbe.output===7&&usageProbe.total===19);
  test('exported safe settings omit API keys',!/apiKey|apikey/i.test(JSON.stringify(safeProjectSettings())));
+ test('audit manifest contains no API keys',!/apiKey|apikey/i.test(JSON.stringify(auditManifest([]))));
  const zipProbe=buildStoreZip([{name:'test.txt',bytes:utf8Bytes('ok')}]);
  test('ZIP writer returns an archive blob',zipProbe instanceof Blob&&zipProbe.size>20);
  return {passed:tests.filter(x=>x.ok).length,total:tests.length,tests};
@@ -2315,6 +2317,7 @@ async function archiveEntriesForPages(list,{includeProject=false}={}){
 }
 async function exportProjectArchive(){
  if(state.running||state.activeControllers.size){alert('Finish active AI requests before building an archive.');return}
+ await saveProjectState();
  const entries=await archiveEntriesForPages(state.items,{includeProject:true});
  downloadBlob('math-photo-notes-archive-'+new Date().toISOString().slice(0,10)+'.zip',buildStoreZip(entries));
 }
@@ -2349,7 +2352,9 @@ async function importProjectFile(file){
  try{parsed=JSON.parse(await file.text());validateProjectEnvelope(parsed)}catch(e){alert('Could not open project: '+(e instanceof Error?e.message:String(e)));return}
  if(state.items.length&&!confirm('Replace the current project with "'+file.name+'"?'))return;
  state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});
- hydrateSavedItems(parsed);await idbPut(DB_PROJECTS,'current',projectEnvelope(true));try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(projectEnvelope(false)))}catch(e){}
+ hydrateSavedItems(parsed);state.guidedReview=false;state.guidedItemId=null;state.regionDraft=null;$('region-modal')?.classList.add('hidden');
+ if(state.queuePlan){state.queuePaused=true;state.running=false;queueButtonsDisabled(true)}
+ await idbPut(DB_PROJECTS,'current',projectEnvelope(true));try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(projectEnvelope(false)))}catch(e){}
  const active=document.querySelector('#tabs button[data-filter="'+state.filter+'"]');if(active)document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===active));
  render();alert('Project opened: '+state.items.length+' page'+(state.items.length===1?'':'s')+'. API keys were not imported and must be entered separately.');
 }
@@ -2359,6 +2364,7 @@ $('open-project-file').onchange=e=>{const file=e.target.files?.[0];e.target.valu
 $('download-txt').onclick=()=>download('photo-to-text-all.txt',plainTextFor(state.items.filter(i=>i.text)));
 $('download-tex').onclick=()=>download('photo-to-text-all.tex',texFor(state.items.filter(i=>i.text)),'application/x-tex;charset=utf-8');
 $('usage-report').onclick=()=>download('photo-to-text-usage-report.json',JSON.stringify(buildUsageReport(state.items),null,2),'application/json;charset=utf-8');
+$('audit-report').onclick=()=>download('photo-to-text-audit-manifest.json',JSON.stringify(auditManifest(state.items),null,2),'application/json;charset=utf-8');
 
 $('download-all').onclick=()=>download('photo-to-text-all.md',mdFor(state.items.filter(i=>i.text)));
 $('download-review').onclick=()=>download('photo-to-text-review.md',mdFor(state.items.filter(i=>i.classification==='review')));
