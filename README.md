@@ -21,14 +21,14 @@ This project is based on the photo-to-text workflow from `steveonw/study-suite` 
 
 Open:
 
-`src/photo_to_text.html`
+`photo_to_text.html`
 
 directly in a modern browser.
 
 ## Project docs
 
-- [Upgrade Plan](docs/UPGRADE_PLAN.md)
-- [AI Handoff Sheet](docs/AI_HANDOFF.md)
+- [Upgrade Plan](UPGRADE_PLAN.md)
+- [AI Handoff Sheet](AI_HANDOFF.md)
 
 ## Core design principle
 
