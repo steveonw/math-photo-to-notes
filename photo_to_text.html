@@ -2908,20 +2908,22 @@ async function acceptExternalProposal(){
  if(current!==proposal.currentTextAtImport&&!confirm('This page changed after the external response was imported. Accept the proposal against the newer current text anyway?'))return;
  const wasApproved=page.classification==='approved'||page.needsReapproval||page.classification==='needsreapproval'||page.preRefreshClassification==='approved';
  const beforeHash=await sha256Hex(current);
- pushRevision(page,'Before external AI correction');
- const repaired=repairLatexForMathJax(proposed);
- reanchorReviewFlags(page,current,repaired.text);reanchorRegions(page,current,repaired.text);
- page.repairedText=repaired.text;page.finalText=repaired.text;page.text=repaired.text;page.repairs=repaired.repairs;
- page.validationWarnings=latexStructuralWarnings(repaired.text);page.validationDetails=latexValidationDetails(repaired.text);page.mathRenderWarnings=[];page.error='';page.lastError='';page.status='done';page.editingSnapshotTaken=false;
- const regionStale=recomputeRegionDependencies(page,repaired.text);
- if(regionStale){
-   const stale=(page.regions||[]).find(x=>x.needsRefresh);markNeedsRefresh(page,stale,'Accepted external correction left a targeted-region dependency out of sync with final text.');if(wasApproved)page.needsReapproval=true;
- }else if(wasApproved){
-   page.needsReapproval=true;page.classification='needsreapproval';page.reason='Accepted external AI correction changed a previously approved page; human reapproval is required.';
- }else{
-   const cl=classifyText(repaired.text);page.classification=cl.classification;page.reason='Accepted external AI correction after human diff review. '+cl.reason;
+ const repaired=repairLatexForMathJax(proposed),textChanged=repaired.text!==current;
+ if(textChanged){
+   pushRevision(page,'Before external AI correction');
+   reanchorReviewFlags(page,current,repaired.text);reanchorRegions(page,current,repaired.text);
+   page.repairedText=repaired.text;page.finalText=repaired.text;page.text=repaired.text;page.repairs=repaired.repairs;
+   page.validationWarnings=latexStructuralWarnings(repaired.text);page.validationDetails=latexValidationDetails(repaired.text);page.mathRenderWarnings=[];page.error='';page.lastError='';page.status='done';page.editingSnapshotTaken=false;
+   const regionStale=recomputeRegionDependencies(page,repaired.text);
+   if(regionStale){
+     const stale=(page.regions||[]).find(x=>x.needsRefresh);markNeedsRefresh(page,stale,'Accepted external correction left a targeted-region dependency out of sync with final text.');if(wasApproved)page.needsReapproval=true;
+   }else if(wasApproved){
+     page.needsReapproval=true;page.classification='needsreapproval';page.reason='Accepted external AI correction changed a previously approved page; human reapproval is required.';
+   }else{
+     const cl=classifyText(repaired.text);page.classification=cl.classification;page.reason='Accepted external AI correction after human diff review. '+cl.reason;
+   }
+   refreshPageNumberSuggestion(page);
  }
- refreshPageNumberSuggestion(page);
  const acceptedHash=await sha256Hex(repaired.text);
  page.externalCorrections=page.externalCorrections||[];
  page.externalCorrections.push({id:proposal.id,packageId:proposal.packageId||'',sourceName:proposal.sourceName||'',importedAt:proposal.importedAt,decidedAt:new Date().toISOString(),decision:'accepted',note:proposal.note||'',proposedText:proposal.correctedText,acceptedText:repaired.text,previousFinalHash:beforeHash,acceptedFinalHash:acceptedHash});
