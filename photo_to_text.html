@@ -1209,6 +1209,143 @@ window.dismissPageSuggestion=id=>{
  const i=state.items.find(x=>x.id===id);if(!i?.pageNumberSuggestion)return;
  i.dismissedPageSuggestion=String(i.pageNumberSuggestion.value);i.pageNumberSuggestion=null;scheduleAutosave();render();
 };
+function loadImageElement(src){
+ return new Promise((resolve,reject)=>{
+   const img=new Image();
+   img.onload=()=>resolve(img);
+   img.onerror=()=>reject(new Error('Could not load source image for targeted crop.'));
+   img.src=src;
+ });
+}
+async function cropRegionData(page,region){
+ const src=page?.imageData||page?.url;if(!src)throw new Error('Original image is unavailable for targeted retry.');
+ const img=await loadImageElement(src);
+ const sx=Math.max(0,Math.round(Number(region.x||0)*img.naturalWidth));
+ const sy=Math.max(0,Math.round(Number(region.y||0)*img.naturalHeight));
+ const sw=Math.max(1,Math.round(Number(region.w||0)*img.naturalWidth));
+ const sh=Math.max(1,Math.round(Number(region.h||0)*img.naturalHeight));
+ const canvas=document.createElement('canvas');canvas.width=Math.min(sw,img.naturalWidth-sx);canvas.height=Math.min(sh,img.naturalHeight-sy);
+ const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Canvas crop is unavailable in this browser.');
+ ctx.drawImage(img,sx,sy,canvas.width,canvas.height,0,0,canvas.width,canvas.height);
+ return canvas.toDataURL('image/jpeg',0.95);
+}
+function closeRegionModal(){
+ $('region-modal').classList.add('hidden');$('region-select-box').classList.add('hidden');$('region-save').disabled=true;state.regionDraft=null;
+}
+window.openTargetRegion=id=>{
+ const page=state.items.find(x=>x.id===id);if(!page)return;
+ if(!page.url&&!page.imageData){alert('The original image is unavailable for a targeted crop.');return}
+ if(state.queuePlan||state.running){alert('Pause or finish the current batch queue before creating a targeted region.');return}
+ const ta=$('source-'+id);
+ const start=ta&&!ta.readOnly?ta.selectionStart:0,end=ta&&!ta.readOnly?ta.selectionEnd:0;
+ const anchorText=ta&&end>start?ta.value.slice(start,end):'';
+ state.regionDraft={itemId:id,anchorStart:start,anchorEnd:end,anchorText,rect:null,dragStart:null};
+ $('region-note').value=anchorText?'Targeted re-read of selected transcription':'Targeted equation / passage';
+ const img=$('region-select-image');img.src=page.imageData||page.url;
+ $('region-select-box').classList.add('hidden');$('region-save').disabled=true;$('region-modal').classList.remove('hidden');
+};
+function regionPointFromEvent(e){
+ const img=$('region-select-image'),rect=img.getBoundingClientRect();
+ const x=Math.max(0,Math.min(1,(e.clientX-rect.left)/Math.max(1,rect.width)));
+ const y=Math.max(0,Math.min(1,(e.clientY-rect.top)/Math.max(1,rect.height)));
+ return {x,y};
+}
+function updateRegionDraftBox(){
+ const d=state.regionDraft,b=$('region-select-box'),img=$('region-select-image');if(!d?.rect)return;
+ const r=d.rect,ir=img.getBoundingClientRect(),wr=$('region-select-wrap').getBoundingClientRect();
+ b.classList.remove('hidden');
+ b.style.left=(ir.left-wr.left+r.x*ir.width)+'px';b.style.top=(ir.top-wr.top+r.y*ir.height)+'px';
+ b.style.width=(r.w*ir.width)+'px';b.style.height=(r.h*ir.height)+'px';
+ $('region-save').disabled=r.w<0.01||r.h<0.01;
+}
+const regionWrap=$('region-select-wrap');
+regionWrap.addEventListener('pointerdown',e=>{
+ if(!state.regionDraft)return;e.preventDefault();regionWrap.setPointerCapture?.(e.pointerId);
+ const p=regionPointFromEvent(e);state.regionDraft.dragStart=p;state.regionDraft.rect={x:p.x,y:p.y,w:0,h:0};updateRegionDraftBox();
+});
+regionWrap.addEventListener('pointermove',e=>{
+ const d=state.regionDraft;if(!d?.dragStart)return;e.preventDefault();
+ const p=regionPointFromEvent(e),x=Math.min(d.dragStart.x,p.x),y=Math.min(d.dragStart.y,p.y);
+ d.rect={x,y,w:Math.abs(p.x-d.dragStart.x),h:Math.abs(p.y-d.dragStart.y)};updateRegionDraftBox();
+});
+function finishRegionDrag(e){if(state.regionDraft)state.regionDraft.dragStart=null}
+regionWrap.addEventListener('pointerup',finishRegionDrag);regionWrap.addEventListener('pointercancel',finishRegionDrag);
+$('region-cancel').onclick=()=>closeRegionModal();
+$('region-modal').addEventListener('click',e=>{if(e.target===$('region-modal'))closeRegionModal()});
+$('region-save').onclick=async()=>{
+ const d=state.regionDraft,page=state.items.find(x=>x.id===d?.itemId);if(!d?.rect||!page)return;
+ const rect=d.rect;if(rect.w<0.01||rect.h<0.01){alert('Select a larger image region.');return}
+ $('region-save').disabled=true;
+ const region={
+   id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random(),
+   x:rect.x,y:rect.y,w:rect.w,h:rect.h,note:$('region-note').value.trim()||'Targeted equation / passage',
+   createdAt:new Date().toISOString(),results:[],events:[],runningPasses:[],preferredResultId:'',appliedResultId:'',
+   disagreement:false,needsRefresh:false,lastError:'',
+   anchor:d.anchorText?{start:d.anchorStart,end:d.anchorEnd,text:d.anchorText,detached:false,sourcePageTextHash:await sha256Hex(page.finalText||page.text||'')}:null
+ };
+ try{
+   region.cropDataUrl=await cropRegionData(page,region);region.cropHash=await sha256Hex(region.cropDataUrl);
+ }catch(e){region.lastError=e instanceof Error?e.message:String(e)}
+ page.regions=page.regions||[];page.regions.push(region);
+ region.events.push({action:'created',at:new Date().toISOString(),note:region.anchor?'Region linked to selected final-text span.':'Region created without a text dependency.'});
+ closeRegionModal();scheduleAutosave();render();
+};
+window.cancelRegionRequests=(pageId,regionId)=>{
+ const prefix='region:'+pageId+':'+regionId+':';
+ for(const [key,ctrl] of state.activeControllers.entries())if(key.startsWith(prefix))ctrl.abort(new DOMException('Targeted request cancelled','AbortError'));
+};
+window.deleteRegion=(pageId,regionId)=>{
+ const page=state.items.find(x=>x.id===pageId);if(!page)return;
+ const region=page.regions?.find(x=>x.id===regionId);if(!region)return;
+ if(region.needsRefresh&&!confirm('This region currently marks the page Needs Refresh. Delete the region and discard that dependency?'))return;
+ window.cancelRegionRequests(pageId,regionId);page.regions=page.regions.filter(x=>x.id!==regionId);settlePageAfterRegionResolution(page);scheduleAutosave();render();
+};
+window.chooseRegionResult=(pageId,regionId,resultId)=>{
+ const page=state.items.find(x=>x.id===pageId),region=page?.regions?.find(x=>x.id===regionId),result=getRegionResult(region,resultId);if(!page||!region||!result)return;
+ region.preferredResultId=resultId;region.dismissedPreferredId='';region.events=region.events||[];
+ region.events.push({action:'preferred',at:new Date().toISOString(),pass:result.pass,provider:result.provider,model:result.model,note:'Human selected this targeted result as preferred. No page text changed automatically.'});
+ if(region.anchor?.text){
+   if(region.anchor.detached)markNeedsRefresh(page,region,'Preferred targeted result was selected, but its linked final-text span is detached.');
+   else{
+     const current=(page.finalText||page.text||'').slice(region.anchor.start,region.anchor.end),target=result.repairedText||result.rawText||'';
+     if(normalizeRegionText(current)!==normalizeRegionText(target))markNeedsRefresh(page,region,'Preferred targeted result differs from linked final transcription; explicit refresh is required.');
+     else{region.needsRefresh=false;settlePageAfterRegionResolution(page)}
+   }
+ }else{
+   region.needsRefresh=false;region.events.push({action:'unlinked',at:new Date().toISOString(),note:'Preferred result has no text dependency; it remains review evidence only.'});
+ }
+ scheduleAutosave();render();
+};
+function resolveRegionAnchor(page,region){
+ const text=page.finalText||page.text||'',a=region.anchor;if(!a?.text)return false;
+ if(text.slice(a.start,a.end)===a.text){a.detached=false;return true}
+ const hits=[];let p=0;while((p=text.indexOf(a.text,p))!==-1){hits.push(p);p+=Math.max(1,a.text.length)}
+ if(!hits.length){a.detached=true;return false}
+ hits.sort((x,y)=>Math.abs(x-a.start)-Math.abs(y-a.start));a.start=hits[0];a.end=hits[0]+a.text.length;a.detached=false;return true;
+}
+window.applyRegionResult=(pageId,regionId)=>{
+ const page=state.items.find(x=>x.id===pageId),region=page?.regions?.find(x=>x.id===regionId),result=preferredRegionResult(region);if(!page||!region||!result)return;
+ if(!region.anchor?.text){alert('This targeted crop is not linked to a final-text span. Create a region while text is selected if you want dependency-aware replacement.');return}
+ if(!resolveRegionAnchor(page,region)){alert('The linked text span can no longer be located. Recreate the targeted region from the current final transcription.');return}
+ const oldText=page.finalText||page.text||'',replacement=result.repairedText||result.rawText||'';
+ pushRevision(page,'Before applying targeted region result');
+ reanchorReviewFlags(page,oldText,oldText.slice(0,region.anchor.start)+replacement+oldText.slice(region.anchor.end));
+ const next=oldText.slice(0,region.anchor.start)+replacement+oldText.slice(region.anchor.end);
+ page.finalText=next;page.text=next;page.validationWarnings=latexStructuralWarnings(next);page.validationDetails=latexValidationDetails(next);
+ region.anchor.end=region.anchor.start+replacement.length;region.anchor.text=replacement;region.anchor.detached=false;region.appliedResultId=result.id;region.needsRefresh=false;
+ region.events.push({action:'applied',at:new Date().toISOString(),pass:result.pass,provider:result.provider,model:result.model,note:'Preferred targeted result explicitly applied to final page text.'});
+ reanchorRegions(page,oldText,next);refreshPageNumberSuggestion(page);
+ page.needsRefresh=(page.regions||[]).some(r=>r.needsRefresh);
+ if(page.needsRefresh)page.classification='needsrefresh';
+ else if(page.needsReapproval||page.preRefreshClassification==='approved'){page.needsReapproval=true;page.classification='needsreapproval';page.reason='Targeted region result changed final transcription; human reapproval is required.'}
+ else{const cl=classifyText(next);page.classification=cl.classification;page.reason='Targeted region result applied. '+cl.reason;page.preRefreshClassification='';page.preRefreshReason=''}
+ scheduleAutosave();render();
+};
+window.keepCurrentRegionText=(pageId,regionId)=>{
+ const page=state.items.find(x=>x.id===pageId),region=page?.regions?.find(x=>x.id===regionId),result=preferredRegionResult(region);if(!page||!region||!result)return;
+ region.dismissedPreferredId=result.id;region.needsRefresh=false;region.events.push({action:'kept-current',at:new Date().toISOString(),pass:result.pass,provider:result.provider,model:result.model,note:'Human kept the current final page text instead of applying the preferred targeted result.'});
+ settlePageAfterRegionResolution(page);scheduleAutosave();render();
+};
 window.zoomImage=(id,delta)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.imageZoom=Math.max(.5,Math.min(3,Number(i.imageZoom||1)+delta));scheduleAutosave();render()};
 window.rotateImage=(id,delta)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.imageRotation=((Number(i.imageRotation||0)+delta)%360+360)%360;scheduleAutosave();render()};
 window.fitImage=(id,mode)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.imageFit=mode;i.imageZoom=1;scheduleAutosave();render()};
