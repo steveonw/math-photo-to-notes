@@ -321,8 +321,11 @@ try{
     assert(result.check.repairedText===verifier,'Independent verifier text was not preserved for human comparison');
     assert(result.secondaryAttempts===0&&result.assuranceAttempts===1,'Verifier was incorrectly counted as a normal Secondary retry');
     assert(!result.routing.some(x=>x.action==='queued'&&x.signature?.startsWith('review>')),'High Assurance disagreement was automatically routed to another AI instead of stopping for human review');
+    const assuranceSummary=page.locator('.card details.historybox summary').filter({hasText:'High Assurance evidence'});
+    assert(await assuranceSummary.count()===1,'High Assurance evidence summary is not visible on the page card');
+    await assuranceSummary.click();
     const card=await page.locator('.card').innerText();
-    assert(/High Assurance evidence/i.test(card)&&/x\^2\+1/.test(card.replace(/\s/g,'')),'Verifier evidence is not visible on the page card');
+    assert(/x\^2\+1/.test(card.replace(/\s/g,'')),'Expanded High Assurance evidence does not show the verifier reading');
     await context.close();
     anthropicResponses=[];
     anthropicResponse=mathResponse;
