@@ -1,135 +1,359 @@
-# AI Handoff Sheet — Photo-to-Text Upgrade Project
+# AI Handoff Sheet — Math Photo to Notes
 
 ## Project
 
-Browser-based bulk photo-to-text transcription tool derived from:
+Browser-based bulk photo-to-text transcription and review tool for handwritten and printed notes, with special support for math-heavy material.
 
-`https://github.com/steveonw/study-suite`
-
-Relevant source tool:
+Main application:
 
 `photo_to_text.html`
 
-Additional LaTeX-repair ideas may be borrowed from:
+Related repositories that informed the design:
 
-`https://github.com/steveonw/equationwright`
+- `steveonw/study-suite` — original photo-to-text workflow
+- `steveonw/equationwright` — deterministic math validation / LaTeX safety ideas
+- other `steveonw` projects — traceability, diagnostics, selective recomputation, persistence, and review-workflow ideas
 
-The user owns the EquationWright repository and has explicitly said its code may be reused for this project.
-
----
-
-# Current Goal
-
-Turn the existing photo-to-text utility into a reliable bulk transcription system for handwritten/printed notes, especially math-heavy notes.
-
-Primary concerns:
-
-1. preserve original text faithfully
-2. preserve mathematical notation
-3. never silently guess uncertain math
-4. automatically separate questionable pages
-5. support cheap first-pass AI and stronger second-pass AI
-6. preserve earlier results during retries
-7. provide MathJax/PDF export
-8. scale to large batches
+The repository owner has explicitly permitted reuse of code and patterns from these repositories.
 
 ---
 
-# Current Processing Piles
+# Current Status
 
-The system currently uses:
+As of 2026-09-30, the project has completed the roadmap through **Upgrade 6**.
+
+Implemented:
+
+- Phase A reliability foundation
+- Phase A2 reliability hardening core
+- live MathJax math review
+- guided human review
+- durable concurrent batch queue
+- pause/resume/cancel
+- transient retry/backoff
+
+The next active milestone is:
+
+## Upgrade 7 — Document Organization + Page Ordering
+
+Planned next:
+
+- notebook/document groups
+- page metadata
+- drag-and-drop ordering
+- page-number suggestions
+- group-aware navigation/export groundwork
+
+Do not skip directly to advanced automatic AI routing unless the organization layer is deliberately deferred.
+
+---
+
+# Core Design Principles
+
+1. **Never silently replace uncertainty with confidence.**
+2. **Never destroy a useful earlier result.**
+3. **Never recompute more than necessary.**
+4. Deterministic application code owns state, validation, caching, routing, and persistence.
+5. AI is used for vision/language judgment, not for application control flow.
+6. Human approval is the final gate for finished transcription.
+
+If a mathematical interpretation is uncertain, keep that uncertainty visible.
+
+Required uncertainty form:
+
+`[MATH_UNSURE: seen="..." guess="..." note="..."] (I think it says: ...)`
+
+---
+
+# Current Processing States
+
+The application currently uses:
 
 - Queued
 - Running
+- Interrupted
 - Good
 - Review
 - Unclear
 - Math Unsure
 - Failed
-
-Planned additional state:
-
 - Approved
+- Needs Reapproval
 
-### Good
-No obvious automatic warning signs.
+## Queued
 
-### Review
-The request succeeded but something looks suspicious.
+Waiting for processing.
 
-### Unclear
-The AI explicitly reports unreadable normal text.
+## Running
 
-Marker:
+Currently assigned to an active AI request.
+
+## Interrupted
+
+Processing was cancelled, timed out repeatedly, interrupted by reload, or exhausted transient retries.
+
+Interrupted means the page is safe to resume. It is not evidence of a bad transcription.
+
+## Good
+
+No current automatic warning signals.
+
+## Review
+
+Transcription succeeded but has warning signs such as suspicious formatting, truncation, or other quality concerns.
+
+## Unclear
+
+The transcription contains explicit unreadable ordinary text.
+
+Markers include:
 
 `[unclear]`
 
-or:
+and:
 
 `[No readable text found]`
 
-### Math Unsure
-The AI is uncertain about a mathematical symbol, operator, exponent, variable, bound, radical, fraction, or equation structure.
+## Math Unsure
 
-Required format:
+There is explicit or detected mathematical ambiguity.
 
-`[MATH_UNSURE: seen="..." guess="..." note="..."] (I think it says: ...)`
+## Failed
 
-### Failed
-API/network/provider failure.
+A non-transient provider/API/configuration error prevented a usable transcription.
 
-### Approved
-Planned state meaning a human reviewed the page and considers it complete.
+Temporary network/provider/rate-limit errors should not be sent directly to Failed.
 
-Approved pages should be protected from automatic reprocessing.
+## Approved
+
+Human-reviewed final transcription.
+
+Approved pages are excluded from automatic/retry processing unless explicitly unlocked or changed.
+
+## Needs Reapproval
+
+A page was previously Approved but its final transcription changed, or review state was added afterward.
+
+It must not silently remain Approved.
 
 ---
 
-# AI Configuration
+# Primary / Secondary AI
 
 There are two independently configurable AI slots.
 
-## Primary AI
-
-Used for normal first-pass processing.
-
-Configurable:
+Each stores:
 
 - provider
 - model
-- API key
-- compatible base URL
+- compatible base URL where required
 - prompt
+- per-pile routing selection
 
-## Secondary AI
+API keys are intentionally not persisted.
 
-Used for retries / difficult pages.
+Supported provider modes currently include:
 
-Same configurable fields.
+- OpenAI
+- Anthropic
+- Google Gemini
+- OpenAI-compatible endpoints
 
-The user specifically wants both Primary and Secondary to remain changeable.
+The provider capability registry records known support for:
+
+- image input
+- truncation metadata
+- usage metadata
+- cancellation
+- compatible-endpoint caveats
+
+Do not assume all OpenAI-compatible endpoints behave identically.
 
 ---
 
 # Per-Pile AI Routing
 
-Each problem pile should have its own selector:
+Current selectors allow independent routing for:
 
-- Review → Primary or Secondary
-- Unclear → Primary or Secondary
-- Math Unsure → Primary or Secondary
-- Failed → Primary or Secondary
-- Current pile → Primary or Secondary
+- Current pile
+- Review
+- Unclear
+- Math Unsure
+- Failed
 
-The user does NOT want one global retry model choice.
+Each can use Primary or Secondary.
 
-Each pile's selection should persist locally.
+These choices persist locally.
+
+Automatic post-classification rerouting is still a later milestone and must use retry limits and the hardened queue engine.
+
+---
+
+# Version Preservation
+
+Every page maintains separate transcription versions:
+
+1. raw AI transcription
+2. mechanically repaired transcription
+3. final human-editable transcription
+
+Retries and important edits preserve previous revisions.
+
+Current controls include:
+
+- View raw
+- View repaired
+- View final
+- Compare versions
+- Restore previous
+
+Revision/provenance data includes, where available:
+
+- provider
+- model
+- pass
+- classification
+- repair information
+- validation warnings
+- truncation metadata
+- attempt history
+
+Do not replace this model with a single mutable text field.
+
+---
+
+# Persistence / Recovery
+
+Current durable storage design:
+
+- IndexedDB stores full project/page state and image data
+- localStorage stores lightweight fallback state and UI/config preferences
+- API keys are never stored
+- project schema is currently:
+
+`math-photo-notes-project-v1`
+
+Running work is normalized to Interrupted/Pending when restored.
+
+A persisted queue can be resumed after reload once the relevant API key is re-entered.
+
+Corrupt or incompatible saved state should be preserved for recovery rather than silently overwritten.
+
+Future schema versions should use explicit migration logic.
+
+---
+
+# Image and Processing Fingerprints
+
+Images may receive SHA-256 hashes using Web Crypto.
+
+Processing fingerprints are based on relevant request inputs such as:
+
+- image hash
+- provider
+- model
+- base URL
+- prompt
+
+These support:
+
+- exact duplicate detection groundwork
+- request provenance
+- result caching
+- avoiding unnecessary recomputation
+
+Explicit fresh retries must be able to bypass cached results.
+
+---
+
+# Content-Addressed Result Cache
+
+Successful AI results can be cached by processing fingerprint in IndexedDB.
+
+Cached results preserve:
+
+- raw transcription
+- provider/model
+- stop reason
+- usage metadata when available
+- timestamp
+
+The cache must never turn an explicitly requested fresh retry into a cached replay.
+
+---
+
+# Durable Queue / Batch Engine
+
+Upgrade 6 introduced a persisted ordered queue.
+
+Current behavior:
+
+- configurable concurrency from 1–6
+- default concurrency: 2
+- Pause stops new launches but allows active requests to finish
+- Resume continues pending jobs
+- Cancel aborts active requests
+- cancelled pages become Interrupted
+- queue order is persisted
+- restored queues come back paused
+- a saved queue cannot be overwritten by starting another queue
+
+The queue is application state, not just a temporary `for` loop.
+
+---
+
+# Transient Retry / Backoff
+
+Transient errors include:
+
+- HTTP 408
+- HTTP 409
+- HTTP 425
+- HTTP 429
+- HTTP 500
+- HTTP 502
+- HTTP 503
+- HTTP 504
+- network failures
+- request timeout
+
+Current policy:
+
+- maximum automatic transient retries: 3
+- normal base delay: 2 seconds
+- exponential backoff
+- delay cap
+- honor `Retry-After` when supplied
+- preserve transient retry history
+
+If transient failures persist after the retry budget, move the page to Interrupted rather than Failed.
+
+Authentication/configuration errors such as HTTP 401 are not transient.
+
+---
+
+# Request Identity / Cancellation Safety
+
+Each AI attempt gets a unique attempt ID.
+
+Requirements already implemented:
+
+- `AbortController`
+- request timeout
+- stale-result guard
+- Cancel Request
+- Cancel Batch
+- duplicate in-flight protection
+
+A response from an obsolete attempt must never overwrite newer work.
+
+Do not remove this protection when adding more concurrency or automatic routing.
 
 ---
 
 # Math Handling Rules
 
-Prefer LaTeX notation.
+Prefer LaTeX for mathematical notation.
 
 Preserve:
 
@@ -138,37 +362,26 @@ Preserve:
 - exponents
 - subscripts
 - Greek letters
-- limits
-- integrals
-- summations
-- matrices
 - derivatives
 - partial derivatives
-- equation alignment
+- integrals
+- sums
+- limits
+- matrices
+- vectors
+- piecewise functions
+- aligned equations
+- bounds
+
+Do not silently infer mathematical structure from ambiguous marks.
 
 ---
 
-# Math Uncertainty Rule
+# Safe LaTeX Repair
 
-Do not silently guess.
+Safe mechanical transformations are allowed.
 
-If uncertain, preserve the uncertainty marker and include a possible interpretation.
-
-Required style:
-
-`[MATH_UNSURE: ...] (I think it says: ...)`
-
-The possible guess must remain visibly a guess.
-
----
-
-# LaTeX Repair Philosophy
-
-EquationWright may be used as inspiration/source for common LaTeX cleanup.
-
-## Safe automatic repairs are allowed
-
-Examples:
+Examples include:
 
 - Unicode minus → ASCII minus
 - `×` → `\times`
@@ -176,216 +389,290 @@ Examples:
 - `∞` → `\infty`
 - `≤` → `\le`
 - `≥` → `\ge`
-- malformed/doubled MathJax delimiters
+- safe delimiter cleanup
 - obvious missing command backslashes inside known math spans
 - control-character cleanup
 
-## Unsafe semantic repairs are NOT allowed
+Unsafe semantic transformation is forbidden.
 
-Important prior bug:
+Permanent regression case:
 
 `√x`
 
-was previously changed to:
+must never be blindly rewritten as:
 
 `\sqrt{}x`
 
-This is NOT acceptable because it changes the structure.
+If radical scope is unclear:
 
-If radical scope is uncertain:
-
-- preserve it
-- raise a Math Unsure warning
+- preserve source
+- warn
+- route toward Math Unsure where appropriate
 
 ---
 
-# EquationWright Validation Ideas
+# Math Validation
 
-Useful validation targets include:
+The application currently performs deterministic structural validation.
 
-- unmatched `{ }`
-- unmatched `\(` `\)`
-- unmatched `\[` `\]`
+Checks include:
+
+- unmatched braces
+- unmatched `\(` / `\)`
+- unmatched `\[` / `\]`
 - unmatched `$$`
 - malformed `\frac`
 - malformed `\sqrt`
-- incomplete superscripts
-- incomplete subscripts
-- broken matrix environments
-- mismatched `\begin{}` and `\end{}`
+- incomplete superscripts/subscripts
+- suspicious integral bounds
+- mismatched environments
 - suspicious missing command backslashes
-- malformed integral bounds
+- Unicode radical warnings
 
-Distinguish:
+Validation now produces structured warning categories and approximate source snippets.
+
+Repairs and warnings are distinct:
 
 ### Repair
-Safe mechanical transformation.
+
+Mechanically safe transformation.
 
 ### Warning
-Needs review because mathematical intent is uncertain.
 
-Warnings should push the page toward Math Unsure rather than silently fixing the expression.
+Possible semantic/math problem needing review.
 
----
-
-# MathJax / PDF
-
-The tool should support PDF export with MathJax rendering.
-
-Important security/design choice:
-
-Do NOT load remote MathJax JavaScript on the main application page where API keys are present.
-
-Instead:
-
-- keep the application page self-contained
-- load MathJax only in the detached print/PDF window
-- set `window.opener = null` on the print window if possible
+Warnings must never silently rewrite uncertain mathematics.
 
 ---
 
-# Version Preservation
+# MathJax / Live Preview
 
-Retries should never destroy earlier successful results.
+The application now provides live source + rendered MathJax preview.
 
-Planned per-image versions:
+Current implementation loads MathJax on demand for live preview and also uses a detached print/PDF window for export.
 
-1. raw AI transcription
-2. repaired transcription
-3. final edited transcription
+Important security follow-up:
 
-Also maintain retry history.
+The older handoff prohibited all remote MathJax loading on the main API-key page. Upgrade 4 introduced on-demand main-page loading for live preview. Before treating this as production-hardened, strongly consider bundling/self-hosting MathJax or otherwise eliminating reliance on third-party remote script execution on a page where API keys may be entered.
 
-Required controls:
+Regardless of renderer behavior:
 
-- Restore previous
-- View raw
-- View repaired
-- View final
-- Compare versions
+- source transcription stays authoritative
+- render failure must not delete source
+- render problems push toward Math Unsure/review
 
 ---
 
-# Current Known Fixes Already Made
+# Guided Human Review
 
-A prior review of the HTML found and fixed several issues:
+Upgrade 5 added Guided Review.
 
-1. JavaScript syntax was valid.
-2. Math Unsure classification existed but the active prompt had lost the instructions that generated the marker.
-3. Old prompts stored in `localStorage` could override newer prompt changes.
-4. The radical repair could change math meaning.
-5. Some repairs were being applied outside math spans.
-6. retries could overwrite earlier successful transcriptions.
-7. Process Batch could re-run questionable completed pages instead of only queued pages.
-8. Current-pile retry had been hard-coded to Primary.
-9. remote MathJax was loaded in the main API-key page.
-10. empty retry piles could unnecessarily trigger API-key validation.
+Current capabilities:
 
-Do not reintroduce these bugs.
+- one-page-at-a-time review
+- previous/next navigation
+- side-by-side image/transcription layout
+- image zoom
+- fit page
+- fit width
+- 90-degree rotation
+- keyboard shortcuts
+
+Keyboard shortcuts:
+
+- `A` → Approve
+- `R` → Review
+- `U` → Unclear
+- `M` → Math Unsure
+- `1` → fresh Primary retry
+- `2` → fresh Secondary retry
+- Left/Right arrows → navigate
+- Escape → leave Guided Review
 
 ---
 
-# Next Recommended Development Phase
+# Anchored Review Flags
 
-## Phase A — Reliability Foundation
+A reviewer may select final transcription text and attach a flag/note.
+
+Flags store:
+
+- selected text
+- approximate character range
+- note
+- timestamp
+- attached/detached state
+
+After edits, the application attempts to re-anchor the flag by matching its selected text near the prior location.
+
+If the text can no longer be found, the flag becomes Detached instead of being silently discarded.
+
+Adding a review flag to an Approved page triggers Needs Reapproval.
+
+---
+
+# Approval Rules
+
+Approval is revision-sensitive.
+
+Approved means:
+
+- human reviewed
+- current final transcription accepted
+- excluded from automatic retry
+- ready for final export
+
+Any material final-text edit after approval must change the page to:
+
+`Needs Reapproval`
+
+Viewing, zooming, or rotating the image does not invalidate approval because those actions do not change transcription content.
+
+---
+
+# Doctor / Diagnostics
+
+The application includes a Doctor report.
+
+It currently checks/reports:
+
+- project schema
+- IndexedDB availability
+- storage estimate where available
+- Web Crypto availability
+- AbortController
+- request timeout
+- concurrency
+- transient retry limit
+- durable queue state
+- cached result count
+- interrupted job count
+- A2 self-tests
+- Primary/Secondary provider/model
+- API-key presence without displaying the key
+- provider capability notes
+
+Diagnostics should remain action-oriented.
+
+---
+
+# Known Bugs / Regressions That Must Not Return
+
+1. Math Unsure prompt instructions disappearing.
+2. stale localStorage prompts overriding a newer default unexpectedly.
+3. `√x → \sqrt{}x` semantic corruption.
+4. repair logic running outside known math spans.
+5. retries destroying earlier transcriptions.
+6. Process Batch reprocessing completed questionable pages unintentionally.
+7. Current-pile retry being hard-coded to Primary.
+8. stale AI responses overwriting newer attempts.
+9. transient 429/5xx/timeouts being treated as transcription failure.
+10. a restored queue being overwritten by starting another queue.
+11. Approved pages remaining Approved after transcription edits.
+12. review flags disappearing silently after text edits.
+13. API keys being written into saved projects.
+
+---
+
+# Current Roadmap
+
+## Completed / substantially implemented
+
+### Upgrade 1 — Phase A
+- Approved
+- raw/repaired/final versions
+- revision history
+- truncation detection
+- retry counters
+- safer LaTeX validation
+- baseline autosave
+
+### Upgrade 2 — Phase A2
+- project schema
+- IndexedDB
+- fallback recovery
+- provider capability registry
+- Doctor diagnostics
+
+### Upgrade 3 — Phase A2 continuation
+- request identity
+- cancellation
+- timeout
+- stale-result guards
+- Interrupted state
+- image/process fingerprints
+- exact-result cache
+- initial self-tests
+
+### Upgrade 4 — Math Review
+- live MathJax preview
+- structured validation
+- Math Unsure parsing/display
+- math-warning categories
+
+### Upgrade 5 — Human Review
+- guided review
+- side-by-side layout
+- zoom/rotation/fit
+- keyboard shortcuts
+- anchored review flags
+- Needs Reapproval
+
+### Upgrade 6 — Batch Queue
+- durable ordered queue
+- concurrency
+- pause/resume
+- cancellation
+- transient retries
+- Retry-After
+- exponential backoff
+
+## Next
+
+### Upgrade 7 — Document Organization + Page Ordering
 
 Build next:
 
-- Approved state
-- raw/repaired/final versions
-- full revision history
-- API truncation detection
-- retry counters
-- stronger LaTeX structural validation
-- autosave
+- notebook/document groups
+- page metadata
+- drag-and-drop ordering
+- page-number suggestions
+- stable order persistence
+- group-aware review navigation
+- groundwork for group-based export
 
----
+## Later
 
-# Later Upgrade Phases
+### Upgrade 8
+Automatic Primary/Secondary routing using the hardened queue engine.
 
-## Phase B — AI Routing
-- optional automatic rerouting
-- per-pile model choice
-- retry limits
-- provider error handling
-- rate-limit handling
+### Upgrade 9
+Equation/region-only retries, model-disagreement review, dependency tracking, Needs Refresh.
 
-## Phase C — Math Review
-- live MathJax preview
-- EquationWright validation
-- math-error highlighting
-- math-specific warning categories
-
-## Phase D — Human Review UI
-- image/transcription side-by-side
-- zoom
-- rotation
-- keyboard shortcuts
-- approve/unapprove
-- next/previous navigation
-
-## Phase E — Batch Scale
-- concurrency control
-- pause/resume
-- queue manager
-- rate-limit backoff
-- duplicate detection
-
-## Phase F — Organization
-- document/notebook groups
-- page ordering
-- page-number detection
-- metadata/tags
-
-## Phase G — Advanced AI Review
-- equation-only retries
-- cropped-region reprocessing
-- Primary/Secondary disagreement detection
-- optional dual-model transcription
-
-## Phase H — Export / Archive
-- Markdown
-- `.tex`
-- PDF
-- plain text
-- project save/load
-- ZIP archive
-- cost/usage report
+### Upgrade 10
+Full project/archive export, portable review packages, cost/usage reporting.
 
 ---
 
 # Desired Long-Term Workflow
 
-`Import → Primary AI → automatic classification → safe LaTeX repair → Good / Review / Unclear / Math Unsure / Failed → selected Primary/Secondary retry per pile → human correction → Approved → export`
+`Import → organize → fingerprint → Primary AI/cache → classify → safe repair/validate → targeted retry → guided human review → Approved → export/archive`
 
----
-
-# Core Design Principle
-
-Never silently replace uncertainty with confidence.
-
-If the software knows a repair is mechanically safe, repair it.
-
-If the AI has a plausible interpretation but is uncertain, show:
-
-`(I think it says: ...)`
-
-If mathematical meaning cannot be determined safely, route it to:
-
-`Math Unsure`
-
-Always keep the original image, raw AI result, repair history, and earlier revisions recoverable.
+The original image, processing provenance, raw AI response, repair history, review flags, retry history, earlier revisions, and approval lineage should remain recoverable.
 
 ---
 
 # Development Constraint
 
-Prefer incremental upgrades over rewriting the entire application at once.
+Prefer incremental upgrades over broad rewrites.
 
-Each phase should:
+Each upgrade should:
 
-1. preserve existing behavior
+1. preserve existing behavior unless intentionally superseded
 2. add one coherent capability
-3. be code-reviewed
-4. be tested against math-heavy and ordinary-note examples
-5. avoid semantic alteration of source notes
+3. keep state backward-compatible where practical
+4. be syntax-checked after modification
+5. preserve mathematical meaning
+6. avoid destroying history
+7. retain safe recovery after interruption
+8. update this handoff and the upgrade plan when architecture changes materially
