@@ -172,6 +172,8 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
         <span id="high-assurance-status" class="small">Off</span>
         <span id="high-assurance-cost-preview" class="small">No added verifier calls while off.</span>
       </div>
+      <label class="mode-toggle" title="Review-only image filters never change the source image sent to AI."><input id="image-assist" type="checkbox"> Image review assist</label>
+      <span id="image-assist-status" class="small">Off</span>
       <button id="doctor">Doctor / Diagnostics</button>
       <button id="guided-review">Guided Review</button>
       <div class="review-nav">
@@ -434,6 +436,7 @@ function safeProjectSettings(){
    concurrency:Number($('concurrency')?.value||2),
    autoRouting:{enabled:autoRoutingEnabled(),maxAttempts:autoMaxAttempts(),cachePolicy:autoCachePolicy()},
    highAssurance:{enabled:highAssuranceEnabled(),policy:highAssurancePolicy()},
+   imageAssist:{enabled:imageAssistEnabled()},
    rates:{
      primaryInput:Number($('rate-primary-input')?.value||0),primaryOutput:Number($('rate-primary-output')?.value||0),
      secondaryInput:Number($('rate-secondary-input')?.value||0),secondaryOutput:Number($('rate-secondary-output')?.value||0)
@@ -452,6 +455,7 @@ function applySafeProjectSettings(settings){
  if(settings.concurrency&&$('concurrency'))$('concurrency').value=String(settings.concurrency);
  const a=settings.autoRouting||{};if($('auto-routing'))$('auto-routing').checked=!!a.enabled;if(a.maxAttempts&&$('auto-max-attempts'))$('auto-max-attempts').value=String(a.maxAttempts);if(a.cachePolicy&&$('auto-cache-policy'))$('auto-cache-policy').value=a.cachePolicy;
  const ha=settings.highAssurance||{};if($('high-assurance'))$('high-assurance').checked=!!ha.enabled;if(ha.policy&&$('high-assurance-policy'))$('high-assurance-policy').value=ha.policy;
+ const ia=settings.imageAssist||{};if($('image-assist'))$('image-assist').checked=!!ia.enabled;
  const rates=settings.rates||{};
  for(const [key,id] of [['primaryInput','rate-primary-input'],['primaryOutput','rate-primary-output'],['secondaryInput','rate-secondary-input'],['secondaryOutput','rate-secondary-output']])if($(id)&&rates[key]!=null)$(id).value=String(rates[key]);
  syncProvider(1,false);syncProvider(2,false);saveSettings();
@@ -592,6 +596,7 @@ function hydrateSavedItems(saved){
      imageRotation:Number(x.imageRotation||0),
      imageZoom:Number(x.imageZoom||1),
      imageFit:x.imageFit||'page',
+     imageReviewMode:x.imageReviewMode||'normal',
      approvalAt:x.approvalAt||'',
      needsReapproval:!!x.needsReapproval,
      transientRetries:Number(x.transientRetries||0),
@@ -705,6 +710,7 @@ function saveSettings(){
  const ha=$('high-assurance'),haPolicy=$('high-assurance-policy');
  if(ha)localStorage.setItem('sorted_ocr_high_assurance',ha.checked?'1':'0');
  if(haPolicy)localStorage.setItem('sorted_ocr_high_assurance_policy',haPolicy.value);
+ const ia=$('image-assist');if(ia)localStorage.setItem('sorted_ocr_image_assist',ia.checked?'1':'0');
  for(const id of ['rate-primary-input','rate-primary-output','rate-secondary-input','rate-secondary-output'])if($(id))localStorage.setItem('sorted_ocr_'+id,$(id).value);
 }
 function loadSettings(){
@@ -728,6 +734,7 @@ function loadSettings(){
  const ha=$('high-assurance'),haPolicy=$('high-assurance-policy');
  if(ha)ha.checked=localStorage.getItem('sorted_ocr_high_assurance')==='1';
  if(haPolicy)haPolicy.value=localStorage.getItem('sorted_ocr_high_assurance_policy')||'heavy';
+ const ia=$('image-assist');if(ia)ia.checked=localStorage.getItem('sorted_ocr_image_assist')==='1';
  for(const id of ['rate-primary-input','rate-primary-output','rate-secondary-input','rate-secondary-output'])if($(id))$(id).value=localStorage.getItem('sorted_ocr_'+id)||'0';
  syncProvider(1,false);
  syncProvider(2,false);
@@ -745,7 +752,7 @@ function syncProvider(which=1,reset=true){
 els.provider.addEventListener('change',()=>syncProvider(1,true));
 els.provider2.addEventListener('change',()=>syncProvider(2,true));
 [els.model,els.baseurl,els.model2,els.baseurl2,els.prompt].forEach(x=>x.addEventListener('change',saveSettings));
-['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai','concurrency','auto-routing','auto-max-attempts','auto-cache-policy','high-assurance','high-assurance-policy','rate-primary-input','rate-primary-output','rate-secondary-input','rate-secondary-output'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',()=>{saveSettings();renderQueueStatus();renderUsageSummary()})});
+['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai','concurrency','auto-routing','auto-max-attempts','auto-cache-policy','high-assurance','high-assurance-policy','image-assist','rate-primary-input','rate-primary-output','rate-secondary-input','rate-secondary-output'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',()=>{saveSettings();renderQueueStatus();renderUsageSummary()})});
 $('auto-routing')?.addEventListener('change',()=>{if(!autoRoutingEnabled())cancelPendingAutoRoutes()});
 
 async function addFiles(list){
@@ -761,7 +768,7 @@ async function addFiles(list){
      text:'',rawText:'',repairedText:'',finalText:'',error:'',repairs:[],validationWarnings:[],validationDetails:[],mathRenderWarnings:[],history:[],reviewFlags:[],
      primaryAttempts:0,secondaryAttempts:0,failures:0,lastError:'',truncated:false,stopReason:'',
      viewMode:'final',compareOpen:false,editingSnapshotTaken:false,imageHash:'',lastFingerprint:'',lastPromptFingerprint:'',lastBatchId:'',lastAutoFixEnabled:false,lastHighAssurance:false,lastHighAssurancePolicy:'',lastAttemptId:'',
-     imageRotation:0,imageZoom:1,imageFit:'page',approvalAt:'',needsReapproval:false,
+     imageRotation:0,imageZoom:1,imageFit:'page',imageReviewMode:'normal',approvalAt:'',needsReapproval:false,
      transientRetries:0,transientErrors:[],retryNotBefore:'',
      documentId:(state.documentFilter!=='all'&&state.documentFilter!=='unfiled')?state.documentFilter:'',
      order:state.items.length,
@@ -1309,6 +1316,9 @@ const SPOTCHECK_ERROR_CATEGORIES=[
  ['missing-text','Missing text'],
  ['extra-text','Extra text'],
  ['formatting-latex','Formatting / LaTeX only'],
+ ['image-blur','Source image blur / focus'],
+ ['image-contrast','Source image contrast / lighting'],
+ ['image-crop','Source image crop / framing'],
  ['other','Other']
 ];
 function spotCheckedPageIds(){return new Set((state.spotCheckLedger||[]).map(x=>x.pageId))}
@@ -1353,6 +1363,22 @@ function currentSpotCheckPage(){
 function spotCheckSessionRecords(sessionId){
  return (state.spotCheckLedger||[]).filter(x=>x.sessionId===sessionId);
 }
+function imageAssistEnabled(){return !!$('image-assist')?.checked}
+function imageQualityEvidence(){
+ const cats=new Set(['image-blur','image-contrast','image-crop']);
+ const errors=(state.spotCheckLedger||[]).filter(x=>x.outcome==='error');
+ const imageErrors=errors.filter(x=>cats.has(x.errorCategory));
+ const byCategory={};for(const x of imageErrors)byCategory[x.errorCategory]=(byCategory[x.errorCategory]||0)+1;
+ const share=errors.length?imageErrors.length/errors.length:0;
+ return {errors:errors.length,imageErrors:imageErrors.length,share,byCategory,recommended:imageErrors.length>=3&&share>=0.25};
+}
+function imageReviewFilter(mode){return ({contrast:'contrast(1.55) brightness(1.04)',grayscale:'grayscale(1) contrast(1.25)',invert:'invert(1) contrast(1.1)'})[mode]||'none'}
+window.cycleImageReviewMode=id=>{
+ if(!imageAssistEnabled()){alert('Enable Image review assist in Advanced first. Review filters are display-only and never change AI input.');return}
+ const item=state.items.find(x=>x.id===id);if(!item)return;
+ const modes=['normal','contrast','grayscale','invert'],at=Math.max(0,modes.indexOf(item.imageReviewMode||'normal'));
+ item.imageReviewMode=modes[(at+1)%modes.length];scheduleAutosave();render();
+};
 function reliabilityGroups(){
  const map=new Map();
  for(const r of state.spotCheckLedger||[]){
@@ -1445,10 +1471,11 @@ function renderReliabilitySummary(){
  const box=$('reliability-summary');if(!box)return;
  const ledger=state.spotCheckLedger||[];
  if(!ledger.length){box.classList.add('hidden');box.innerHTML='';return}
- const ok=ledger.filter(x=>x.outcome==='ok').length,errors=ledger.filter(x=>x.outcome==='error').length,groups=reliabilityGroups().slice(0,5);
+ const ok=ledger.filter(x=>x.outcome==='ok').length,errors=ledger.filter(x=>x.outcome==='error').length,groups=reliabilityGroups().slice(0,5),imageEvidence=imageQualityEvidence();
  box.classList.remove('hidden');
  box.innerHTML='<b>Spot-check evidence</b> · '+ledger.length+' human-reviewed Good page'+(ledger.length===1?'':'s')+' · '+ok+' marked OK · '+errors+' error'+(errors===1?'':'s')+' found.'+
    '<div class="small" style="margin-top:4px">Counts are operational evidence, not a formal accuracy percentage.</div>'+
+   (imageEvidence.recommended?'<div class="reason" style="margin-top:8px"><b>Image review assist suggested by evidence:</b> '+imageEvidence.imageErrors+' of '+imageEvidence.errors+' human-found errors were tagged blur, contrast/lighting, or crop/framing. Enable the Advanced Image review assist toggle for display-only filters; OCR input stays unchanged.</div>':'')+
    '<div class="reliability-groups">'+groups.map(g=>'<div class="reliability-row"><b>'+esc(g.provider)+' · '+esc(g.model)+' · '+(g.highAssuranceVerified?'High Assurance verified ('+esc(highAssurancePolicyLabel(g.highAssurancePolicy))+')':'Standard / not independently verified')+'</b> · '+g.total+' checked · '+g.ok+' OK · '+g.error+' error'+(g.error===1?'':'s')+'<br><span class="small">Prompt '+esc((g.promptFingerprint||'unavailable').slice(0,12))+(g.promptFingerprint?'…':'')+'</span></div>').join('')+'</div>'+
    '<div class="spotcheck-controls"><button id="download-spotcheck-ledger">Download spot-check evidence .json</button></div>';
  const dl=$('download-spotcheck-ledger');if(dl)dl.onclick=()=>download('photo-to-text-spot-check-evidence.json',JSON.stringify({schema:'math-photo-notes-spot-check-v1',generatedAt:new Date().toISOString(),records:state.spotCheckLedger||[]},null,2),'application/json;charset=utf-8');
@@ -1527,13 +1554,14 @@ function retryBatchFailed(pageIds){
  startQueue(eligible,snapForChoice(pass),{kind:'retry-failed',label:'Failed-page retry',showSummary:true});
 }
 function renderQueueStatus(){
- const status=$('queue-status'),pause=$('pause-queue'),concurrency=$('concurrency'),autoStatus=$('auto-routing-status'),haStatus=$('high-assurance-status'),haCost=$('high-assurance-cost-preview'),haToggle=$('high-assurance'),haPolicy=$('high-assurance-policy');
+ const status=$('queue-status'),pause=$('pause-queue'),concurrency=$('concurrency'),autoStatus=$('auto-routing-status'),haStatus=$('high-assurance-status'),haCost=$('high-assurance-cost-preview'),haToggle=$('high-assurance'),haPolicy=$('high-assurance-policy'),iaStatus=$('image-assist-status');
  if(concurrency)concurrency.disabled=!!state.running;
  if(haToggle)haToggle.disabled=!!state.running;
  if(haPolicy)haPolicy.disabled=!!state.running;
  if(autoStatus)autoStatus.textContent=autoRoutingEnabled()?'On · max '+autoMaxAttempts()+' · '+(autoCachePolicy()==='fresh'?'fresh calls':'cache allowed'):'Off';
  if(haStatus)haStatus.textContent=highAssuranceEnabled()?'On · '+highAssurancePolicyLabel()+' · verifier: Secondary':'Off';
  if(haCost)haCost.textContent=highAssuranceCostPreview();
+ if(iaStatus){const ev=imageQualityEvidence();iaStatus.textContent=(imageAssistEnabled()?'On':'Off')+(ev.recommended?' · recommended by '+ev.imageErrors+' image-quality findings':'');}
  if(pause){
    pause.textContent=state.queuePaused?'Resume queue':'Pause queue';
    pause.disabled=!state.queuePlan;
@@ -1577,7 +1605,7 @@ function render(){
   <aside class="side">
    <div class="drag-handle">↕ Drag to reorder · Order ${Number(i.order||0)+1}</div>
    <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div><span class="doc-chip">${esc(documentName(i.documentId))}</span>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}<div class="small">Attempts: Primary ${i.primaryAttempts||0} · Secondary ${i.secondaryAttempts||0} · Assurance ${i.highAssuranceAttempts||0} · Failures ${i.failures||0} · Transient retries ${i.transientRetries||0}</div>${i.imageHash?`<div class="small">Image hash: ${esc(i.imageHash.slice(0,12))}…</div>`:''}</div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
-   ${i.url?`<div class="image-stage"><img id="image-${i.id}" class="preview" src="${i.url}" alt="${esc(i.name)}" style="transform:rotate(${Number(i.imageRotation||0)}deg) scale(${Number(i.imageZoom||1)});${i.imageFit==='width'?'width:100%;max-width:none;':'max-width:100%;max-height:68vh;'}"></div>
+   ${i.url?`<div class="image-stage"><img id="image-${i.id}" class="preview" src="${i.url}" alt="${esc(i.name)}" style="transform:rotate(${Number(i.imageRotation||0)}deg) scale(${Number(i.imageZoom||1)});filter:${imageReviewFilter(i.imageReviewMode)};${i.imageFit==='width'?'width:100%;max-width:none;':'max-width:100%;max-height:68vh;'}"></div>
    <div class="image-tools">
     <button onclick="zoomImage('${i.id}',-0.15)">Zoom −</button>
     <button onclick="zoomImage('${i.id}',0.15)">Zoom +</button>
@@ -1586,6 +1614,7 @@ function render(){
     <button onclick="rotateImage('${i.id}',-90)">↶ 90°</button>
     <button onclick="rotateImage('${i.id}',90)">↷ 90°</button>
     <button onclick="openTargetRegion('${i.id}')">Target region</button>
+    <button onclick="cycleImageReviewMode('${i.id}')">Image view: ${esc(i.imageReviewMode||'normal')}</button>
    </div>`:'<div class="reason">Original image was not retained by browser autosave. Text/history are still available.</div>'}
    <div class="toolbar">
     ${i.classification==='approved'?'<button onclick="unapprove(\''+i.id+'\')">Unapprove</button>':`<button onclick="runSingleById('${i.id}')">Run again with Primary</button>`}
@@ -2663,6 +2692,11 @@ async function runA2SelfTests(){
  test('spot-check sampling excludes previously checked Good pages',eligibleGoodSpotCheckPages(['g1','g2']).map(x=>x.id).join(',')==='g2');
  state.items=originalItems;state.spotCheckLedger=originalLedger;
  test('reliability summary uses counts, not an accuracy field',!('accuracy' in (reliabilityGroups()[0]||{})));
+ const imageLedgerBefore=state.spotCheckLedger;
+ state.spotCheckLedger=[{pageId:'q1',outcome:'error',errorCategory:'image-blur'},{pageId:'q2',outcome:'error',errorCategory:'image-contrast'},{pageId:'q3',outcome:'error',errorCategory:'image-crop'},{pageId:'q4',outcome:'ok'}];
+ test('image review assist recommendation requires human image-quality evidence',imageQualityEvidence().recommended===true);
+ test('image review filters are display-only CSS values',imageReviewFilter('contrast').includes('contrast')&&imageReviewFilter('normal')==='none');
+ state.spotCheckLedger=imageLedgerBefore;
  const extParsed=parseExternalCorrectionText('Commentary before\n\`\`\`json\n{"package_id":"p1","pages":[{"page_id":"x","corrected_text":"fixed"}]}\n\`\`\`\nCommentary after');
  test('external correction parser tolerates fenced JSON and commentary',extParsed.package_id==='p1'&&extParsed.pages?.[0]?.page_id==='x');
  const latexBlock=parseExternalCorrectionText('=== PACKAGE p2 ===\n=== PAGE x ===\n$\\frac{1}{2}\\theta \\neq \\sqrt{x}$\n=== NOTE ===\nmath preserved\n=== END ===');
@@ -2703,6 +2737,7 @@ async function runDoctor(){
    ['High Assurance',highAssuranceEnabled()?'Enabled · '+highAssurancePolicyLabel()+' · Secondary verifier'+((p.provider===s.provider&&p.model===s.model)?' (same provider/model, independent call)':''):'Disabled'],
    ['High Assurance results',(()=>{const checks=state.items.flatMap(i=>i.highAssuranceChecks||[]);return checks.filter(x=>x.outcome==='verified').length+' verified / '+checks.filter(x=>x.outcome==='review').length+' review / '+checks.filter(x=>x.outcome==='failed').length+' failed'})()],
    ['Archive compression',typeof CompressionStream==='function'?'Per-entry deflate enabled when it reduces size':'Store-only compatibility fallback'],
+   ['Image review assist',(()=>{const ev=imageQualityEvidence();return (imageAssistEnabled()?'Enabled':'Disabled')+' · '+ev.imageErrors+' image-quality findings / '+ev.errors+' human-found errors'+(ev.recommended?' · evidence threshold met':'')})()],
    ['Durable queue',state.queuePlan?(state.queuePaused?'Paused / resumable':'Active'):'Idle'],
    ['Cached results',String(cacheCount)],
    ['Interrupted jobs',String(interrupted)],
