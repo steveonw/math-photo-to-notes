@@ -916,11 +916,23 @@ The known semantic bug `√x → \\sqrt{}x` must remain a permanent regression t
 
 ## Phase F — Document Organization
 
+**Status:** Implemented in Upgrade 7 on 2026-09-30.
+
 1. notebook/document groups
 2. page metadata
 3. page number suggestions
 4. drag-and-drop ordering
-5. group-based exports
+5. document-scoped Markdown/PDF export groundwork
+
+Implemented behavior:
+
+- groups persist in the project envelope
+- pages may remain Unfiled
+- page order is stable and persisted
+- Guided Review respects the active document filter
+- page metadata includes title, class, chapter, lecture, date, page number, and tags
+- suggestions are deterministic and must be accepted explicitly
+- suggestions never reorder pages automatically
 
 ## Phase G — Advanced AI Review
 
@@ -958,7 +970,7 @@ Avoid autonomous multi-agent orchestration where deterministic application logic
 
 # Current Implementation Snapshot
 
-As of 2026-09-30, Upgrades 1–6 are implemented or substantially implemented in `photo_to_text.html`.
+As of 2026-09-30, Upgrades 1–7 are implemented or substantially implemented in `photo_to_text.html`.
 
 Current architecture includes:
 
@@ -977,8 +989,16 @@ Current architecture includes:
 - configurable 1–6 request concurrency
 - pause/resume/cancel
 - transient 429/5xx/network/timeout retries with Retry-After and exponential backoff
+- persistent document/notebook groups and Unfiled pages
+- stable page ordering with drag-and-drop
+- per-page metadata
+- explicit-only page-number suggestions
+- document-scoped Guided Review
+- document-specific Markdown/PDF export groundwork
 
-The next active development target is **Upgrade 7 — Document Organization + Page Ordering**.
+A stale duplicated HTML tail discovered during Upgrade 7 was removed so the repository again contains one canonical HTML document.
+
+The next active development target is **Upgrade 8 — Automatic Primary/Secondary Routing**.
 
 ---
 
@@ -1031,23 +1051,40 @@ Implemented capabilities include a persisted ordered queue, 1–6 configurable s
 ### Upgrade 7
 Document organization + page ordering.
 
+**Status:** Implemented on 2026-09-30.
+
+Implemented capabilities:
+
+- persistent notebook/document groups plus Unfiled
+- stable page ordering before and after processing
+- drag-and-drop reorder controls
+- page metadata: title, class, chapter, lecture, date, page number, tags
+- deterministic non-destructive page-number suggestions
+- per-page accept/dismiss suggestion controls
+- explicit bulk application of suggestions within the current document
+- group-aware Guided Review navigation
+- ordering/group data in autosave/project state
+- document-specific Markdown and PDF export groundwork
+
+Page-number suggestions never reorder pages automatically.
+
+### Upgrade 8
+Automatic Primary/Secondary routing using the hardened processing engine.
+
 **Status:** Next active milestone.
 
 Planned scope:
 
-- persistent notebook/document groups
-- stable page ordering before and after processing
-- drag-and-drop reorder controls
-- page metadata: title, class, chapter, lecture, date, page number, tags
-- manual page-number entry plus non-destructive page-number suggestions
-- group-aware Guided Review navigation
-- ordering/group data included in autosave/project state
-- groundwork for group-based Markdown/PDF/archive export
-
-Page-number recognition must never silently reorder pages unless the user explicitly enables/accepts that behavior.
-
-### Upgrade 8
-Automatic Primary/Secondary routing using the hardened processing engine.
+- opt-in automatic routing for Review / Unclear / Math Unsure / eligible failure recovery
+- preserve independent per-pile Primary/Secondary choice
+- route through the durable queue instead of ad-hoc recursive calls
+- maximum total AI attempts per page
+- cycle/loop prevention
+- visible routing history and reason
+- Approved-page protection
+- no automatic approval
+- explicit cache-vs-fresh retry policy
+- pause/resume/cancel remains authoritative
 
 ### Upgrade 9
 Equation/region-only retries + model disagreement checking + dependency/Needs Refresh tracking.
