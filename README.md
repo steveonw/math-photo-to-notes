@@ -14,6 +14,8 @@ Quick Transcribe uses one Primary semantic transcription pass per page. Optional
 
 At the end of a run, the dashboard can open flagged pages in Guided Review, resume Interrupted pages, retry eligible Failed pages, or export the project. **Good means no automatic warning signals were detected; it does not mean independently verified.**
 
+Release B adds **Good-page spot checks**. A completed batch can randomly sample 1, 5, 10, or 20 Good pages for source-image review. Human outcomes are recorded as OK or Error found, with optional error category/note. Error-found pages move to Review without changing their transcription. The persistent reliability ledger records model, prompt fingerprint, processing fingerprint, image/final-text hashes, and batch settings; the UI reports only human-reviewed counts, not a formal accuracy percentage.
+
 **High Assurance Math** is shown as a disabled future option and is not active yet.
 
 ## Current capabilities
