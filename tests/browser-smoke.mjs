@@ -40,6 +40,7 @@ const browser=await chromium.launch({headless:true});
 const appUrl='http://'+host+':'+port+'/photo_to_text.html';
 const mathResponse='The derivative of $x^2$ is $2x$, and this sentence contains enough ordinary words for a good classification.';
 let anthropicResponse=mathResponse;
+let anthropicResponses=[];
 let anthropicCalls=0;
 const pngBase64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQwAAAABJRU5ErkJggg==';
 
@@ -63,11 +64,12 @@ async function newPage(){
     };
     if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers:cors,body:''});
     anthropicCalls++;
+    const responseText=anthropicResponses.length?anthropicResponses.shift():anthropicResponse;
     return route.fulfill({
       status:200,
       headers:{...cors,'content-type':'application/json'},
       body:JSON.stringify({
-        content:[{type:'text',text:anthropicResponse}],
+        content:[{type:'text',text:responseText}],
         stop_reason:'end_turn',
         usage:{input_tokens:11,output_tokens:23}
       })
@@ -231,6 +233,99 @@ try{
     assert(after.ledger.errorCategory==='exponent-subscript','Error category was not preserved');
     assert(/Exponent should be checked/.test(after.ledger.note),'Spot-check note was not preserved');
     await context.close();
+  }
+
+  // Release D: High Assurance independently verifies math-heavy Good pages without replacing Primary text.
+  {
+    const primary='The calculation below is important: $\\int_0^1 x^2\\,dx = \\sum_{n=1}^{10} n$. These surrounding words make the page long enough for normal Good classification.';
+    const verifier=primary;
+    anthropicResponse=primary;
+    anthropicResponses=[primary,verifier];
+    anthropicCalls=0;
+    const {context,page}=await newPage();
+    await page.evaluate(()=>{
+      document.getElementById('provider2').value='anthropic';
+      document.getElementById('provider2').dispatchEvent(new Event('change',{bubbles:true}));
+      document.getElementById('model2').value='claude-secondary-smoke';
+      document.getElementById('apikey2').value='secondary-test-key';
+      document.getElementById('high-assurance').checked=true;
+      document.getElementById('high-assurance-policy').value='heavy';
+      document.getElementById('high-assurance').dispatchEvent(new Event('change',{bubbles:true}));
+    });
+    await addFixture(page,'high-assurance-agree.png');
+    const preview=await page.evaluate(()=>{renderQueueStatus();return document.getElementById('high-assurance-cost-preview').textContent});
+    assert(/Up to 1 extra Secondary call/i.test(preview),'High Assurance did not expose added-call cost preview: '+preview);
+    await page.click('#run');
+    await page.waitForFunction(()=>!state.queuePlan&&state.items[0]?.highAssuranceStatus==='verified',null,{timeout:20000});
+    const result=await page.evaluate(()=>({
+      finalText:state.items[0].finalText,
+      classification:state.items[0].classification,
+      status:state.items[0].highAssuranceStatus,
+      attempts:state.items[0].highAssuranceAttempts,
+      checks:state.items[0].highAssuranceChecks,
+      usage:state.items[0].usageLog,
+      summary:state.lastBatchSummary
+    }));
+    assert(anthropicCalls===2,'High Assurance agreement should make one Primary and one Secondary call, got '+anthropicCalls);
+    assert(result.finalText===primary,'High Assurance agreement replaced or changed Primary final text');
+    assert(result.classification==='good'&&result.status==='verified','High Assurance agreement did not remain verified Good: '+JSON.stringify(result));
+    assert(result.attempts===1&&result.checks.length===1&&result.checks[0].outcome==='verified','High Assurance verification evidence was not recorded');
+    assert(result.checks[0].provider==='anthropic'&&result.checks[0].model==='claude-secondary-smoke','Verifier provider/model provenance missing');
+    assert(result.usage.some(x=>x.scope==='high-assurance'&&x.pass==='secondary'),'Verifier usage was not exposed in the usage log');
+    assert(result.summary.highAssurance===true&&result.summary.highAssurancePolicy==='heavy','Batch summary lost High Assurance policy');
+
+    await page.click('#summary-spotcheck-good');
+    await page.click('#spotcheck-ok');
+    await page.waitForFunction(()=>state.spotCheckLedger.length===1,null,{timeout:5000});
+    const evidence=await page.evaluate(()=>({rec:state.spotCheckLedger[0],groups:reliabilityGroups()}));
+    assert(evidence.rec.highAssuranceVerified===true&&evidence.rec.highAssurancePolicy==='heavy','Spot-check evidence did not record actual High Assurance verification');
+    assert(evidence.groups[0]?.highAssuranceVerified===true,'Reliability grouping cannot compare verified vs standard pages');
+    await context.close();
+    anthropicResponses=[];
+  }
+
+  // Release D: math disagreement routes to Review, preserves Primary, and never feeds disagreement into Auto-fix.
+  {
+    const primary='The calculation below is important: $\\int_0^1 (x^2-1)\\,dx = \\sum_{n=1}^{10} n$. These surrounding words make the page long enough for normal Good classification.';
+    const verifier='The calculation below is important: $\\int_0^1 (x^2+1)\\,dx = \\sum_{n=1}^{10} n$. These surrounding words make the page long enough for normal Good classification.';
+    anthropicResponse=primary;
+    anthropicResponses=[primary,verifier];
+    anthropicCalls=0;
+    const {context,page}=await newPage();
+    await page.evaluate(()=>{
+      document.getElementById('provider2').value='anthropic';
+      document.getElementById('provider2').dispatchEvent(new Event('change',{bubbles:true}));
+      document.getElementById('model2').value='claude-secondary-smoke';
+      document.getElementById('apikey2').value='secondary-test-key';
+      document.getElementById('high-assurance').checked=true;
+      document.getElementById('high-assurance-policy').value='heavy';
+      document.getElementById('auto-routing').checked=true;
+      document.getElementById('auto-max-attempts').value='3';
+    });
+    await addFixture(page,'high-assurance-disagree.png');
+    await page.click('#run');
+    await page.waitForFunction(()=>!state.queuePlan&&state.items[0]?.highAssuranceStatus==='review',null,{timeout:20000});
+    const result=await page.evaluate(()=>({
+      finalText:state.items[0].finalText,
+      classification:state.items[0].classification,
+      assuranceStatus:state.items[0].highAssuranceStatus,
+      check:state.items[0].highAssuranceChecks.at(-1),
+      routing:state.items[0].routingHistory,
+      secondaryAttempts:state.items[0].secondaryAttempts,
+      assuranceAttempts:state.items[0].highAssuranceAttempts
+    }));
+    assert(anthropicCalls===2,'High Assurance disagreement should stop after Primary + verifier, even with Auto-fix enabled; calls='+anthropicCalls);
+    assert(result.finalText===primary,'High Assurance disagreement silently replaced the Primary transcription');
+    assert(result.classification==='review'&&result.assuranceStatus==='review','High Assurance disagreement did not route page to Review');
+    assert(result.check?.comparison?.disagree===true&&result.check?.comparison?.mathEqual===false,'Sign-level math disagreement was not detected');
+    assert(result.check.repairedText===verifier,'Independent verifier text was not preserved for human comparison');
+    assert(result.secondaryAttempts===0&&result.assuranceAttempts===1,'Verifier was incorrectly counted as a normal Secondary retry');
+    assert(!result.routing.some(x=>x.action==='queued'&&x.signature?.startsWith('review>')),'High Assurance disagreement was automatically routed to another AI instead of stopping for human review');
+    const card=await page.locator('.card').innerText();
+    assert(/High Assurance evidence/i.test(card)&&/x\^2\+1/.test(card.replace(/\s/g,'')),'Verifier evidence is not visible on the page card');
+    await context.close();
+    anthropicResponses=[];
+    anthropicResponse=mathResponse;
   }
 
   // Release C: external-AI packages use stable IDs and imported proposals cannot change text before human acceptance.
