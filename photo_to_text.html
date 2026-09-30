@@ -911,6 +911,107 @@ function reanchorReviewFlags(i,oldText,newText){
    }else flag.detached=true;
  }
 }
+function normalizeRegionText(text){
+ return String(text||'').replace(/\s+/g,' ').trim();
+}
+function getRegionResult(region,resultId){
+ return region?.results?.find(x=>x.id===resultId)||null;
+}
+function preferredRegionResult(region){
+ return getRegionResult(region,region?.preferredResultId);
+}
+function reanchorRegions(i,oldText,newText){
+ if(!i||!Array.isArray(i.regions))return;
+ for(const region of i.regions){
+   const a=region.anchor;if(!a||!a.text)continue;
+   if(newText.slice(a.start,a.end)===a.text){a.detached=false;continue}
+   const hits=[];let pos=0;
+   while((pos=newText.indexOf(a.text,pos))!==-1){hits.push(pos);pos+=Math.max(1,a.text.length)}
+   if(hits.length){
+     hits.sort((x,y)=>Math.abs(x-a.start)-Math.abs(y-a.start));
+     a.start=hits[0];a.end=hits[0]+a.text.length;a.detached=false;
+   }else a.detached=true;
+ }
+}
+function recomputeRegionDependencies(i,newText){
+ if(!i||!Array.isArray(i.regions))return false;
+ let any=false;
+ for(const region of i.regions){
+   const pref=preferredRegionResult(region),a=region.anchor;
+   if(!pref||!a||!a.text){region.needsRefresh=false;continue}
+   if(a.detached){region.needsRefresh=true;any=true;continue}
+   const current=newText.slice(a.start,a.end);
+   const target=pref.repairedText||pref.rawText||'';
+   region.needsRefresh=normalizeRegionText(current)!==normalizeRegionText(target);
+   if(region.needsRefresh)any=true;
+ }
+ return any;
+}
+function markNeedsRefresh(i,region,reason){
+ if(!i||!region)return;
+ if(!i.needsRefresh){
+   i.preRefreshClassification=i.classification||'review';
+   i.preRefreshReason=i.reason||'';
+ }
+ if(i.classification==='approved')i.needsReapproval=true;
+ i.needsRefresh=true;region.needsRefresh=true;i.status='done';i.classification='needsrefresh';
+ i.reason=reason||'A targeted region result differs from the linked final transcription.';
+}
+function settlePageAfterRegionResolution(i){
+ if(!i)return;
+ const any=(i.regions||[]).some(r=>r.needsRefresh);
+ i.needsRefresh=any;
+ if(any){i.classification='needsrefresh';i.status='done';return}
+ if(i.needsReapproval||i.preRefreshClassification==='approved'){
+   i.needsReapproval=true;i.classification='needsreapproval';i.status='done';
+   i.reason='Targeted region review was resolved; human reapproval is required.';
+ }else if(i.preRefreshClassification){
+   i.classification=i.preRefreshClassification;i.status=i.classification==='failed'?'error':'done';
+   i.reason=i.preRefreshReason||'Targeted region review resolved.';
+ }else{
+   const cl=classifyText(i.finalText||i.text||'');i.classification=cl.classification;i.status='done';i.reason=cl.reason;
+ }
+ i.preRefreshClassification='';i.preRefreshReason='';
+}
+function regionQuality(text){
+ const t=String(text||'');
+ if(/\[MATH_UNSURE:/i.test(t))return {classification:'mathunsure',reason:'Targeted result contains an explicit math-uncertainty marker.'};
+ if(/\[unclear\]|\[No readable text found\]/i.test(t))return {classification:'unclear',reason:'Targeted result contains an explicit unreadable-text marker.'};
+ const warnings=latexStructuralWarnings(t);
+ if(warnings.length)return {classification:'mathunsure',reason:'Targeted result has LaTeX warnings: '+warnings.join('; ')};
+ return {classification:'good',reason:'No targeted-result warning signs detected.'};
+}
+function renderRegionCard(page,region){
+ const pref=preferredRegionResult(region);
+ const coord=[region.x,region.y,region.w,region.h].map(v=>Math.round(Number(v||0)*100)+'%').join(' · ');
+ const anchor=region.anchor?.text||'';
+ const passes=region.runningPasses||[];
+ return `<div class="region-card ${region.disagreement?'region-disagree':''}">
+   <div class="region-head">
+    <div><b>${esc(region.note||'Targeted region')}</b><div class="small">Crop: ${esc(coord)} · ${region.cropHash?'hash '+esc(region.cropHash.slice(0,12))+'…':''}</div>
+    ${anchor?`<div class="small">${region.anchor?.detached?'Detached dependency':'Linked final-text span'}: “${esc(anchor.slice(0,100))}${anchor.length>100?'…':''}”</div>`:'<div class="small">No final-text span linked.</div>'}</div>
+    ${region.cropDataUrl?`<img class="region-thumb" src="${region.cropDataUrl}" alt="Targeted crop">`:''}
+   </div>
+   ${region.disagreement?`<div class="reason" style="border-color:#f59e0b;background:#fffbeb"><b>Model disagreement:</b> latest Primary and Secondary targeted readings differ. No answer was selected automatically.</div>`:''}
+   ${region.needsRefresh?`<div class="reason" style="border-color:#7dd3fc;background:#f0f9ff"><b>Dependency stale:</b> preferred targeted result differs from the linked page text.</div>`:''}
+   ${region.lastError?`<div class="error">${esc(region.lastError)}</div>`:''}
+   <div class="toolbar">
+    <button onclick="runRegionPass('${page.id}','${region.id}','primary')">Retry crop Primary</button>
+    <button onclick="runRegionPass('${page.id}','${region.id}','secondary')">Retry crop Secondary</button>
+    <button onclick="runRegionComparison('${page.id}','${region.id}')">Compare Primary + Secondary</button>
+    ${passes.length?`<button onclick="cancelRegionRequests('${page.id}','${region.id}')">Cancel region request</button>`:''}
+    <button onclick="deleteRegion('${page.id}','${region.id}')">Delete region</button>
+   </div>
+   ${region.results?.length?`<div class="region-results">${region.results.slice().reverse().map(res=>`<div class="region-result ${region.preferredResultId===res.id?'preferred':''}">
+     <b>${esc(res.pass)} · ${esc(res.provider)} · ${esc(res.model)}</b> <span class="small">· ${esc(res.at?new Date(res.at).toLocaleString():'')}</span>
+     <pre>${esc(res.repairedText||res.rawText||'')}</pre>
+     ${res.validationWarnings?.length?`<div class="small">Warnings: ${esc(res.validationWarnings.join(' • '))}</div>`:''}
+     <button onclick="chooseRegionResult('${page.id}','${region.id}','${res.id}')">${region.preferredResultId===res.id?'Preferred result':'Use as preferred'}</button>
+    </div>`).join('')}</div>`:''}
+   ${pref&&region.anchor?.text?`<div class="toolbar"><button class="primary" onclick="applyRegionResult('${page.id}','${region.id}')">Apply preferred to final text</button><button onclick="keepCurrentRegionText('${page.id}','${region.id}')">Keep current final text</button></div>`:''}
+   ${region.events?.length?`<details class="historybox"><summary>Region provenance (${region.events.length})</summary><ol>${region.events.slice().reverse().map(ev=>`<li><b>${esc(ev.action||'event')}</b> · ${esc(ev.pass||'')} ${esc(ev.provider||'')} ${esc(ev.model||'')}<br><span class="small">${esc(ev.note||'')}${ev.at?' · '+esc(new Date(ev.at).toLocaleString()):''}</span></li>`).join('')}</ol></details>`:''}
+  </div>`;
+}
 function documentOptionsHTML(selected){
  return '<option value="">Unfiled</option>'+state.documents.map(d=>'<option value="'+esc(d.id)+'"'+(d.id===selected?' selected':'')+'>'+esc(d.name)+'</option>').join('');
 }
@@ -1137,11 +1238,16 @@ window.editText=(id,v)=>{
  const oldText=i.finalText||i.text||'';
  if(!i.editingSnapshotTaken){pushRevision(i,'Before manual edit');i.editingSnapshotTaken=true}
  reanchorReviewFlags(i,oldText,v);
- const wasApproved=i.classification==='approved'||i.needsReapproval;
+ reanchorRegions(i,oldText,v);
+ const wasApproved=i.classification==='approved'||i.needsReapproval||i.preRefreshClassification==='approved';
  i.finalText=v;i.text=v;
  i.validationWarnings=latexStructuralWarnings(v);
  i.validationDetails=latexValidationDetails(v);
- if(wasApproved){
+ const regionStale=recomputeRegionDependencies(i,v);
+ if(regionStale){
+   const stale=(i.regions||[]).find(r=>r.needsRefresh);markNeedsRefresh(i,stale,'Manual page edit left a targeted-region dependency out of sync with final text.');
+   if(wasApproved)i.needsReapproval=true;
+ }else if(wasApproved){
    markNeedsReapproval(i,'Final transcription changed after approval; human reapproval is required.');
  }else if(i.status==='done'){
    const cl=classifyText(v);
@@ -1154,6 +1260,7 @@ window.editText=(id,v)=>{
 };
 window.manualClass=(id,c)=>{
  const i=state.items.find(x=>x.id===id);if(!i)return;
+ if(c==='approved'&&(i.needsRefresh||(i.regions||[]).some(r=>r.needsRefresh))){alert('Resolve the targeted-region Needs Refresh dependency before approving this page.');return}
  pushRevision(i,c==='approved'?'Before approval':'Before manual classification');
  i.classification=c;i.status=c==='failed'?'error':'done';
  i.reason=c==='approved'?'Human reviewed and approved this page.':'Manually assigned to '+c+'.';
@@ -1347,13 +1454,17 @@ async function runOne(i,s,{forceFresh=false}={}){
    if(i.activeAttemptId!==attemptId)return {outcome:'stale'};
    const rawText=result.text;
    const repaired=repairLatexForMathJax(rawText);
+   const previousFinal=i.finalText||i.text||'';
+   reanchorRegions(i,previousFinal,repaired.text);
    let cl=classifyText(repaired.text);
    const validationWarnings=latexStructuralWarnings(repaired.text);
    const validationDetails=latexValidationDetails(repaired.text);
    if(result.truncated)cl={classification:'review',reason:'Possible truncated response; provider indicated output may have stopped early.'};
+   const regionStaleAfterFullPass=recomputeRegionDependencies(i,repaired.text);
+   if(regionStaleAfterFullPass)cl={classification:'needsrefresh',reason:'Whole-page retry completed, but a preferred targeted-region result still differs from its linked page text.'};
    i.rawText=rawText;i.repairedText=repaired.text;i.finalText=repaired.text;i.text=i.finalText;
    i.repairs=repaired.repairs;i.validationWarnings=validationWarnings;i.validationDetails=validationDetails;i.mathRenderWarnings=[];i.truncated=!!result.truncated;i.stopReason=result.stopReason||'';
-   i.usage=result.usage||null;i.status='done';i.classification=cl.classification;i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
+   i.usage=result.usage||null;i.status='done';i.classification=cl.classification;i.needsRefresh=regionStaleAfterFullPass;i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
    i.reason=(cached?'Reused exact cached result. ':'')+(repaired.repairs.length?'Auto-repaired '+repaired.repairs.length+' common LaTeX artifact'+(repaired.repairs.length===1?'':'s')+'. ':'')+cl.reason;
    i.error='';i.lastError='';i.lastFailureStatus=0;i.retryNotBefore='';refreshPageNumberSuggestion(i);
    if(!cached&&fingerprint)await cachePut(fingerprint,{schema:PROJECT_SCHEMA,createdAt:new Date().toISOString(),rawText,result:{truncated:!!result.truncated,stopReason:result.stopReason||''},truncated:!!result.truncated,stopReason:result.stopReason||'',usage:result.usage||null,provider:s.provider,model:s.model});
@@ -1441,7 +1552,7 @@ function eligibleAutomaticFailure(i,nextPass,previousPass){
 }
 function autoRouteGuardReason(i,classification,nextPass,previousPass,maxAttempts){
  if(!i)return 'Item no longer exists.';
- if(i.classification==='approved'||i.needsReapproval||i.classification==='needsreapproval')return 'Human approval state is protected from automatic routing.';
+ if(i.classification==='approved'||i.needsReapproval||i.classification==='needsreapproval'||i.needsRefresh||i.classification==='needsrefresh')return 'Human approval or targeted-refresh state is protected from automatic routing.';
  if(!['review','unclear','mathunsure','failed'].includes(classification))return 'Classification does not require automatic routing.';
  if(totalProcessingAttempts(i)>=maxAttempts)return 'Maximum '+maxAttempts+' processing attempts reached.';
  if(classification==='failed'&&!eligibleAutomaticFailure(i,nextPass,previousPass))return 'Failure appears to require human configuration or the original image.';
@@ -1511,7 +1622,7 @@ function pumpQueue(){
    if(!job)break;
    const item=state.items.find(x=>x.id===job.id);
    if(!item){job.state='done';job.finishedAt=new Date().toISOString();continue}
-   if(item.classification==='approved'||item.needsReapproval||item.classification==='needsreapproval'){
+   if(item.classification==='approved'||item.needsReapproval||item.classification==='needsreapproval'||(job.autoRoute&&(item.needsRefresh||item.classification==='needsrefresh'))){
      job.state='done';job.finishedAt=new Date().toISOString();job.outcome='protected';continue
    }
    const jobSnap=snapForQueueJob(job,plan);
