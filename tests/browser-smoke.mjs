@@ -189,6 +189,15 @@ try{
     const reliability=await page.locator('#reliability-summary').innerText();
     assert(/1 human-reviewed Good page/i.test(reliability),'Reliability summary did not show accumulated human count');
     assert(/not a formal accuracy percentage/i.test(reliability),'Reliability summary overclaimed accuracy');
+
+    const clearPersistence=await page.evaluate(async()=>{
+      window.confirm=()=>true;
+      await document.getElementById('clear').onclick();
+      const stored=await idbGet(DB_RELIABILITY,RELIABILITY_LEDGER_KEY);
+      return {items:state.items.length,inMemory:state.spotCheckLedger.length,stored:Array.isArray(stored)?stored.length:0};
+    });
+    assert(clearPersistence.items===0,'Clear all did not clear the working project');
+    assert(clearPersistence.inMemory===1&&clearPersistence.stored===1,'Clear all erased global spot-check reliability evidence: '+JSON.stringify(clearPersistence));
     await context.close();
   }
 
@@ -242,13 +251,31 @@ try{
         pageId:item.id,
         names:entries.map(x=>x.name),
         prompt:read('review-prompt.txt'),
-        template:JSON.parse(read('return-template.json'))
+        templateText:read('return-template.txt'),
+        jsonFallback:JSON.parse(read('return-template-json-fallback.json'))
       };
     });
     assert(packageCheck.names.includes('review-prompt.txt')&&packageCheck.names.includes('manifest.json'),'External review package is missing prompt/manifest');
-    assert(packageCheck.template.package_id==='pkg-ci-1','External review return template lost package ID');
-    assert(packageCheck.template.pages[0].page_id===packageCheck.pageId,'External review return template lost stable page ID');
-    assert(!('classification' in packageCheck.template.pages[0]),'External review template must not ask the outside AI for classification');
+    assert(packageCheck.names.includes('return-template.txt'),'External review package is missing LaTeX-safe plain return template');
+    assert(packageCheck.templateText.includes('=== PACKAGE pkg-ci-1 ==='),'Plain return template lost package ID');
+    assert(packageCheck.templateText.includes('=== PAGE '+packageCheck.pageId+' ==='),'Plain return template lost stable page ID');
+    assert(packageCheck.jsonFallback.package_id==='pkg-ci-1','JSON fallback template lost package ID');
+    assert(!('classification' in packageCheck.jsonFallback.pages[0]),'External review template must not ask the outside AI for classification');
+    assert(/NOT JSON/i.test(packageCheck.prompt)&&/LaTeX backslashes/i.test(packageCheck.prompt),'External review prompt does not prioritize the LaTeX-safe return format');
+
+    const latexSafety=await page.evaluate(id=>{
+      const expected=String.raw`$\frac{1}{2}\beta + \theta \neq \sqrt{x}$`;
+      const plain='=== PACKAGE pkg-ci-1 ===\n=== PAGE '+id+' ===\n'+expected+'\n=== NOTE ===\nPreserve literal LaTeX.\n=== END ===';
+      const parsed=parseExternalCorrectionText(plain);
+      let unsafeMessage='';
+      try{
+        parseExternalCorrectionText(String.raw`{"package_id":"pkg-ci-1","pages":[{"page_id":"${id}","corrected_text":"$\frac{1}{2}\beta + \theta \neq \sqrt{x}$"}]}`);
+      }catch(e){unsafeMessage=String(e?.message||e)}
+      return {expected,actual:parsed.pages[0].corrected_text,format:parsed._format,unsafeMessage};
+    },packageCheck.pageId);
+    assert(latexSafety.actual===latexSafety.expected,'Delimited external import corrupted LaTeX: '+JSON.stringify(latexSafety));
+    assert(latexSafety.format==='delimited','LaTeX-safe external response was not parsed as delimited format');
+    assert(/Unsafe LaTeX backslash escaping/i.test(latexSafety.unsafeMessage),'Unsafe JSON LaTeX was not rejected specifically: '+latexSafety.unsafeMessage);
 
     const corrected='The derivative of $x^3$ is $3x^2$, and this corrected transcription contains enough words for a normal good classification.';
     const importResult=await page.evaluate(({id,corrected})=>{
