@@ -321,6 +321,7 @@ Rules:
 const state={items:[],filter:'all',running:false,autosaveTimer:null,autosaveWarning:'',cancelRequested:false,activeControllers:new Map(),previewTimers:new Map(),guidedReview:false,guidedItemId:null,guidedScope:'filter',guidedPageIds:null,queuePlan:null,queueRuntimeSnap:null,queueRuntimeSnaps:{},queuePaused:false,queuePumpScheduled:false,lastBatchSummary:null,spotCheckLedger:[],spotCheckSession:null,externalReviewExports:[],externalImportSession:null,documents:[],documentFilter:'all',dragItemId:null,regionDraft:null};
 const AUTOSAVE_KEY='math_photo_to_notes_phase_a_v1';
 const PROJECT_SCHEMA='math-photo-notes-project-v1';
+const CURRENT_PROJECT_VERSION=2;
 const DB_NAME='math-photo-to-notes';
 const DB_VERSION=2;
 const DB_PROJECTS='projects';
@@ -458,7 +459,7 @@ function applySafeProjectSettings(settings){
 function projectEnvelope(includeImages=true){
  return {
    schema:PROJECT_SCHEMA,
-   version:1,
+   version:CURRENT_PROJECT_VERSION,
    savedAt:new Date().toISOString(),
    settings:safeProjectSettings(),
    filter:state.filter,
@@ -480,8 +481,47 @@ function projectEnvelope(includeImages=true){
 function validateProjectEnvelope(saved){
  if(!saved||typeof saved!=='object')throw new Error('Project is not an object.');
  if(saved.schema&&saved.schema!==PROJECT_SCHEMA)throw new Error('Unsupported project schema: '+saved.schema);
+ const version=Number(saved.version||1);
+ if(!Number.isInteger(version)||version<1)throw new Error('Invalid project version: '+saved.version);
+ if(version>CURRENT_PROJECT_VERSION)throw new Error('Project version '+version+' is newer than this app supports ('+CURRENT_PROJECT_VERSION+').');
  if(!Array.isArray(saved.items))throw new Error('Project has no valid items array.');
  return saved;
+}
+function migrateProjectEnvelope(saved){
+ validateProjectEnvelope(saved);
+ let out={...saved,items:saved.items.map(x=>({...x}))};
+ let version=Number(out.version||1);
+ const history=Array.isArray(out.migrationHistory)?out.migrationHistory.map(x=>({...x})):[];
+ while(version<CURRENT_PROJECT_VERSION){
+   if(version===1){
+     out.items=out.items.map(item=>({
+       ...item,
+       regions:Array.isArray(item.regions)?item.regions.map(region=>({
+         ...region,
+         results:Array.isArray(region.results)?region.results:[],
+         events:Array.isArray(region.events)?region.events:[]
+       })):[]
+     }));
+     if(out.queue&&Array.isArray(out.queue.jobs)){
+       out.queue={...out.queue,jobs:out.queue.jobs.map(job=>({
+         ...job,
+         kind:job.kind||(job.highAssuranceVerify?'high-assurance':'page')
+       }))};
+     }
+     history.push({from:1,to:2,at:new Date().toISOString(),note:'Added explicit durable job kinds and normalized targeted-region persistence.'});
+     version=2;out.version=2;
+     continue;
+   }
+   throw new Error('No migration path from project version '+version+'.');
+ }
+ out.version=CURRENT_PROJECT_VERSION;
+ out.migrationHistory=history.slice(-50);
+ return out;
+}
+function prepareProjectEnvelope(saved){
+ const migrated=migrateProjectEnvelope(saved);
+ validateProjectEnvelope(migrated);
+ return migrated;
 }
 async function saveProjectState(){
  const payload=projectEnvelope(true);
@@ -609,7 +649,7 @@ async function restoreProjectState(){
  let saved=null;
  try{
    saved=await idbGet(DB_PROJECTS,'current');
-   if(saved){validateProjectEnvelope(saved);hydrateSavedItems(saved);return}
+   if(saved){saved=prepareProjectEnvelope(saved);hydrateSavedItems(saved);return}
  }catch(e){
    try{
      const raw=JSON.stringify(saved);
@@ -620,7 +660,7 @@ async function restoreProjectState(){
  try{
    const raw=localStorage.getItem(AUTOSAVE_KEY);
    if(!raw)return;
-   saved=JSON.parse(raw);validateProjectEnvelope(saved);hydrateSavedItems(saved);
+   saved=prepareProjectEnvelope(JSON.parse(raw));hydrateSavedItems(saved);
  }catch(e){
    state.autosaveWarning='Saved project data is malformed. It was not overwritten.';
  }
@@ -1132,7 +1172,7 @@ function renderRegionCard(page,region){
  const pref=preferredRegionResult(region);
  const coord=[region.x,region.y,region.w,region.h].map(v=>Math.round(Number(v||0)*100)+'%').join(' · ');
  const anchor=region.anchor?.text||'';
- const passes=region.runningPasses||[];
+ const passes=[...new Set([...(region.runningPasses||[]),...regionQueuedPasses(page.id,region.id)])];
  return `<div class="region-card ${region.disagreement?'region-disagree':''}">
    <div class="region-head">
     <div><b>${esc(region.note||'Targeted region')}</b><div class="small">Crop: ${esc(coord)} · ${region.cropHash?'hash '+esc(region.cropHash.slice(0,12))+'…':''}</div>
@@ -1504,8 +1544,8 @@ function renderQueueStatus(){
  const done=jobs.filter(j=>j.state==='done').length;
  const running=jobs.filter(j=>j.state==='running').length;
  const pending=jobs.filter(j=>j.state==='pending').length;
- const autoJobs=jobs.filter(j=>j.autoRoute).length,haJobs=jobs.filter(j=>j.highAssuranceVerify).length;
- status.textContent=(state.queuePaused?'Paused':'Queue')+': '+done+'/'+jobs.length+' done · '+running+' running · '+pending+' pending'+(autoJobs?' · '+autoJobs+' auto':'')+(haJobs?' · '+haJobs+' assurance':'')+(state.queuePlan.pauseReason?' · '+state.queuePlan.pauseReason:'');
+ const autoJobs=jobs.filter(j=>j.autoRoute).length,haJobs=jobs.filter(j=>j.highAssuranceVerify).length,regionJobs=jobs.filter(j=>j.kind==='region').length;
+ status.textContent=(state.queuePaused?'Paused':'Queue')+': '+done+'/'+jobs.length+' done · '+running+' running · '+pending+' pending'+(autoJobs?' · '+autoJobs+' auto':'')+(haJobs?' · '+haJobs+' assurance':'')+(regionJobs?' · '+regionJobs+' targeted':'')+(state.queuePlan.pauseReason?' · '+state.queuePlan.pauseReason:'');
 }
 function render(){
  renderStats();
@@ -1772,10 +1812,16 @@ $('region-save').onclick=async()=>{
 window.cancelRegionRequests=(pageId,regionId)=>{
  const prefix='region:'+pageId+':'+regionId+':';
  for(const [key,ctrl] of state.activeControllers.entries())if(key.startsWith(prefix))ctrl.abort(new DOMException('Targeted request cancelled','AbortError'));
+ const plan=state.queuePlan;let changed=false;
+ if(plan)for(const job of plan.jobs||[])if(job.kind==='region'&&job.id===pageId&&job.regionId===regionId&&job.state==='pending'){
+   job.state='done';job.outcome='cancelled';job.finishedAt=new Date().toISOString();changed=true;
+ }
+ if(changed){scheduleAutosave();if(!finishQueueIfDone())pumpQueue();else render()}
 };
 window.deleteRegion=(pageId,regionId)=>{
  const page=state.items.find(x=>x.id===pageId);if(!page)return;
  const region=page.regions?.find(x=>x.id===regionId);if(!region)return;
+ if(regionHasQueueWork(pageId,regionId)){alert('Cancel this region job and wait for the queue to settle before deleting the region.');return}
  if(region.needsRefresh&&!confirm('This region currently marks the page Needs Refresh. Delete the region and discard that dependency?'))return;
  window.cancelRegionRequests(pageId,regionId);page.regions=page.regions.filter(x=>x.id!==regionId);settlePageAfterRegionResolution(page);scheduleAutosave();render();
 };
@@ -2048,11 +2094,16 @@ function updateRegionDisagreement(page,region){
    }
  }
 }
+function regionQueuedPasses(pageId,regionId){
+ const jobs=state.queuePlan?.jobs||[];
+ return [...new Set(jobs.filter(j=>j.kind==='region'&&j.id===pageId&&j.regionId===regionId&&(j.state==='pending'||j.state==='running')).map(j=>j.pass))];
+}
+function regionHasQueueWork(pageId,regionId){return regionQueuedPasses(pageId,regionId).length>0}
 async function runRegionPass(pageId,regionId,pass,options={}){
  const page=state.items.find(x=>x.id===pageId),region=page?.regions?.find(x=>x.id===regionId);if(!page||!region)return null;
- if(state.queuePlan||state.running){if(!options.silent)alert('Finish or cancel the whole-page batch queue before running targeted region AI.');return null}
- if(!options.allowConcurrent&&state.activeControllers.size){if(!options.silent)alert('Another AI request is already running.');return null}
- const snap=snapForChoice(pass),msg=snapValidationMessage(snap);if(msg){if(!options.silent)alert(msg);return null}
+ if((state.queuePlan||state.running)&&!options.fromQueue){if(!options.silent)alert('Finish or cancel the current queue before starting another targeted-region job.');return null}
+ if(!options.fromQueue&&!options.allowConcurrent&&state.activeControllers.size){if(!options.silent)alert('Another AI request is already running.');return null}
+ const snap=options.snap||snapForChoice(pass),msg=snapValidationMessage(snap);if(msg){if(!options.silent)alert(msg);return null}
  let crop=region.cropDataUrl;
  try{if(!crop){crop=await cropRegionData(page,region);region.cropDataUrl=crop;region.cropHash=await sha256Hex(crop)}}catch(e){region.lastError=e instanceof Error?e.message:String(e);scheduleAutosave();render();return null}
  const key='region:'+pageId+':'+regionId+':'+pass+':'+(crypto.randomUUID?crypto.randomUUID():Date.now());
@@ -2063,8 +2114,10 @@ async function runRegionPass(pageId,regionId,pass,options={}){
  try{
    let result=null,retryIndex=0;
    while(true){
-     try{result=await transcribeWithTimeout(temp,targeted,controller.signal);break}
-     catch(e){
+     try{
+       if(options.fromQueue)await waitWhileQueuePaused(controller.signal);
+       result=await transcribeWithTimeout(temp,targeted,controller.signal);break
+     }catch(e){
        if(controller.signal.aborted)throw controller.signal.reason||new DOMException('Cancelled','AbortError');
        if(!isTransientError(e)||retryIndex>=MAX_TRANSIENT_RETRIES)throw e;
        const delay=transientDelayMs(e,retryIndex);retryIndex++;
@@ -2091,16 +2144,22 @@ async function runRegionPass(pageId,regionId,pass,options={}){
    state.activeControllers.delete(key);region.runningPasses=(region.runningPasses||[]).filter(x=>x!==pass);scheduleAutosave();render();
  }
 }
-window.runRegionPass=(pageId,regionId,pass)=>runRegionPass(pageId,regionId,pass);
-window.runRegionComparison=async(pageId,regionId)=>{
- if(state.queuePlan||state.running||state.activeControllers.size){alert('Finish other AI work before comparing a targeted region.');return}
- const p=snapPrimary(),s=snapSecondary();if(!validateSnap(p)||!validateSnap(s))return;
- await Promise.all([
-   runRegionPass(pageId,regionId,'primary',{allowConcurrent:true,silent:true}),
-   runRegionPass(pageId,regionId,'secondary',{allowConcurrent:true,silent:true})
- ]);
- const page=state.items.find(x=>x.id===pageId),region=page?.regions?.find(x=>x.id===regionId);if(page&&region){updateRegionDisagreement(page,region);scheduleAutosave();render()}
-};
+function startRegionQueue(pageId,regionId,passes){
+ if(state.queuePlan||state.running||state.activeControllers.size){alert('Finish or cancel the current queue before starting targeted-region work.');return false}
+ const page=state.items.find(x=>x.id===pageId),region=page?.regions?.find(x=>x.id===regionId);if(!page||!region)return false;
+ if(!page.imageData&&!page.url){alert('The original image is unavailable for this targeted region.');return false}
+ const unique=[...new Set((passes||[]).map(x=>x==='secondary'?'secondary':'primary'))];
+ if(!unique.length)return false;
+ for(const pass of unique)if(!validateSnap(snapForChoice(pass)))return false;
+ const id=crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random(),now=new Date().toISOString();
+ const jobs=unique.map(pass=>({id:pageId,regionId,state:'pending',pass,kind:'region',forceFresh:true,autoRoute:false,createdAt:now}));
+ state.queuePlan={id,pass:unique[0],provider:snapForChoice(unique[0]).provider,model:snapForChoice(unique[0]).model,createdAt:now,jobs,pageIds:[pageId],kind:'region',label:'Targeted region',showSummary:false,regionId};
+ refreshQueueRuntimeSnaps();state.queueRuntimeSnap=state.queueRuntimeSnaps[unique[0]];state.queuePaused=false;state.cancelRequested=false;state.running=true;
+ region.events=region.events||[];for(const pass of unique){const s=state.queueRuntimeSnaps[pass];region.events.push({action:'queued',at:now,pass,provider:s.provider,model:s.model,note:'Targeted-region job queued durably.'})}
+ queueButtonsDisabled(true);scheduleAutosave();render();pumpQueue();return true;
+}
+window.runRegionPass=(pageId,regionId,pass)=>startRegionQueue(pageId,regionId,[pass]);
+window.runRegionComparison=(pageId,regionId)=>startRegionQueue(pageId,regionId,['primary','secondary']);
 
 function highAssuranceVerifierPrompt(basePrompt){
  return 'Independently transcribe the original page image from scratch as a verification reading. You are NOT being shown the Primary transcription and must not assume or reconstruct it. Preserve mathematical structure exactly, use the project uncertainty markers when warranted, and return only the transcription.\n\nProject transcription rules:\n'+String(basePrompt||'');
@@ -2341,7 +2400,7 @@ function startQueue(list,s,options={}){
    if(!item||seen.has(item.id)||item.classification==='approved'||item.status==='running')continue;
    seen.add(item.id);
    const pass=passForItem(item)==='secondary'?'secondary':'primary';
-   jobs.push({id:item.id,state:'pending',pass,forceFresh:!(item.status==='queued'||item.status==='interrupted'),autoRoute:false,createdAt:new Date().toISOString()});
+   jobs.push({id:item.id,state:'pending',pass,kind:'page',forceFresh:!(item.status==='queued'||item.status==='interrupted'),autoRoute:false,createdAt:new Date().toISOString()});
  }
  if(!jobs.length){alert('There are no eligible items to process.');return}
  if(options.showSummary)state.lastBatchSummary=null;
@@ -2452,7 +2511,7 @@ function pumpQueue(){
    if(!job)break;
    const item=state.items.find(x=>x.id===job.id);
    if(!item){job.state='done';job.finishedAt=new Date().toISOString();continue}
-   if(item.classification==='approved'||item.needsReapproval||item.classification==='needsreapproval'||(job.autoRoute&&(item.needsRefresh||item.classification==='needsrefresh'))){
+   if(job.kind!=='region'&&(item.classification==='approved'||item.needsReapproval||item.classification==='needsreapproval'||(job.autoRoute&&(item.needsRefresh||item.classification==='needsrefresh')))){
      job.state='done';job.finishedAt=new Date().toISOString();job.outcome='protected';continue
    }
    const jobSnap=snapForQueueJob(job,plan);
@@ -2466,14 +2525,16 @@ function pumpQueue(){
    job.state='running';job.startedAt=new Date().toISOString();job.provider=jobSnap.provider;job.model=jobSnap.model;active++;
    item.lastBatchId=plan.id||'';item.lastAutoFixEnabled=!!plan.autoFixAtStart;item.lastHighAssurance=!!plan.highAssuranceAtStart;item.lastHighAssurancePolicy=plan.highAssurancePolicy||'';
    scheduleAutosave();renderQueueStatus();
-   const runner=job.highAssuranceVerify?runHighAssuranceVerification(item,jobSnap,job):runOne(item,jobSnap,{forceFresh:!!job.forceFresh});
+   const runner=job.kind==='region'
+     ?runRegionPass(item.id,job.regionId,job.pass,{fromQueue:true,silent:true,allowConcurrent:true,snap:jobSnap}).then(rec=>({outcome:rec?'done':'region-failed',classification:item.classification,regionResultId:rec?.id||''}))
+     :(job.highAssuranceVerify?runHighAssuranceVerification(item,jobSnap,job):runOne(item,jobSnap,{forceFresh:!!job.forceFresh}));
    runner.then(async result=>{
      if(state.queuePlan!==plan)return;
      job.state='done';job.finishedAt=new Date().toISOString();job.outcome=result?.outcome||'done';
      if(job.autoRoute){
        recordRoutingEvent(item,{action:'completed',from:job.fromClassification||'',pass:job.pass||'',provider:job.provider||'',model:job.model||'',reason:'Automatic route completed with '+(item.classification||result?.classification||'unknown')+'.',signature:job.signature||''});
      }
-     if(!job.highAssuranceVerify){
+     if(!job.highAssuranceVerify&&job.kind!=='region'){
        await maybeAppendHighAssuranceVerification(plan,item,job,result);
        maybeAppendAutomaticRoute(plan,item,job,result);
      }
@@ -2543,6 +2604,11 @@ async function runA2SelfTests(){
  const authTest=providerHttpError({status:401,headers:{get:()=>null}},{error:{message:'auth'}},'auth');
  test('HTTP 401 is not transient',isTransientError(authTest)===false);
  try{validateProjectEnvelope({schema:PROJECT_SCHEMA,version:1,items:[]});test('project schema validates',true)}catch(e){test('project schema validates',false)}
+ try{
+   const migrated=migrateProjectEnvelope({schema:PROJECT_SCHEMA,version:1,items:[{id:'legacy',regions:[{id:'r',results:null,events:null}]}],queue:{jobs:[{id:'legacy',state:'running',pass:'primary'}]}});
+   test('project v1 migrates explicitly to current version',migrated.version===CURRENT_PROJECT_VERSION&&migrated.queue.jobs[0].kind==='page'&&Array.isArray(migrated.items[0].regions[0].results));
+ }catch(e){test('project v1 migrates explicitly to current version',false)}
+ try{validateProjectEnvelope({schema:PROJECT_SCHEMA,version:CURRENT_PROJECT_VERSION+1,items:[]});test('future project version is rejected',false)}catch(e){test('future project version is rejected',true)}
  try{validateProjectEnvelope({schema:'bad-schema',items:[]});test('unknown project schema is rejected',false)}catch(e){test('unknown project schema is rejected',true)}
  if(crypto?.subtle){
    const a=await sha256Hex('same'),b=await sha256Hex('same'),d=await sha256Hex('different');
@@ -2570,6 +2636,11 @@ async function runA2SelfTests(){
  test('audit manifest contains no API keys',!/apiKey|apikey/i.test(JSON.stringify(auditManifest([]))));
  const zipProbe=buildStoreZip([{name:'test.txt',bytes:utf8Bytes('ok')}]);
  test('ZIP writer returns an archive blob',zipProbe instanceof Blob&&zipProbe.size>20);
+ const queueBefore=state.queuePlan;
+ state.queuePlan={id:'region-q',kind:'region',jobs:[{id:'p',regionId:'r',kind:'region',pass:'secondary',state:'running'}]};
+ const serializedRegionQueue=projectEnvelope(false).queue;
+ state.queuePlan=queueBefore;
+ test('running targeted-region queue jobs serialize as resumable pending work',serializedRegionQueue.jobs[0].kind==='region'&&serializedRegionQueue.jobs[0].state==='pending'&&serializedRegionQueue.jobs[0].regionId==='r');
  const summaryProbe={id:'batch-test',pageIds:['a','b'],label:'Quick Transcribe',showSummary:true};
  test('batch summary preserves unique run page IDs',buildBatchSummary(summaryProbe).pageIds.length===2);
  test('Quick Transcribe auto-fix is opt-in',autoRoutingEnabled()===!!$('auto-routing')?.checked);
@@ -3340,7 +3411,7 @@ async function importProjectFile(file){
  if(!file)return;
  if(state.running||state.activeControllers.size||state.queuePlan){alert('Finish or cancel active processing before opening another project.');return}
  let parsed;
- try{parsed=JSON.parse(await file.text());validateProjectEnvelope(parsed)}catch(e){alert('Could not open project: '+(e instanceof Error?e.message:String(e)));return}
+ try{parsed=prepareProjectEnvelope(JSON.parse(await file.text()))}catch(e){alert('Could not open project: '+(e instanceof Error?e.message:String(e)));return}
  if(state.items.length&&!confirm('Replace the current project with "'+file.name+'"?'))return;
  state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});
  hydrateSavedItems(parsed);await saveGlobalSpotCheckLedger();state.guidedReview=false;state.guidedItemId=null;state.regionDraft=null;$('region-modal')?.classList.add('hidden');
