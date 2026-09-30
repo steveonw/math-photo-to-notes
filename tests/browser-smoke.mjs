@@ -198,6 +198,10 @@ try{
     });
     assert(clearPersistence.items===0,'Clear all did not clear the working project');
     assert(clearPersistence.inMemory===1&&clearPersistence.stored===1,'Clear all erased global spot-check reliability evidence: '+JSON.stringify(clearPersistence));
+    await page.reload({waitUntil:'domcontentloaded'});
+    await page.waitForFunction(()=>state.spotCheckLedger.length===1&&state.items.length===0,null,{timeout:5000});
+    const afterReload=await page.evaluate(()=>({items:state.items.length,ledger:state.spotCheckLedger.length}));
+    assert(afterReload.items===0&&afterReload.ledger===1,'Global reliability evidence did not survive Clear all plus reload: '+JSON.stringify(afterReload));
     await context.close();
   }
 
