@@ -51,6 +51,31 @@ Implemented:
 
 The numbered Upgrade 1–10 roadmap is complete.
 
+## Critical math-path hotfix — 2026-09-30
+
+A headless-browser review exposed a release-blocking bug in the dynamic missing-backslash repair regex inside `repairMathSpan`.
+
+The over-escaped `RegExp` constructor threw `Unterminated group` on the first recognized math span. This meant otherwise successful provider responses containing delimited math could be misreported as Failed.
+
+The hotfix changed the engineering contract in addition to fixing the two escaping lines:
+
+- the dynamic repair regex now compiles correctly
+- restored LaTeX commands insert exactly one backslash
+- successful provider raw text is assigned to the page before repair/validation/classification
+- successful raw text is written to the exact-result cache before post-processing
+- usage/provenance is recorded before post-processing
+- a local repair/validator exception produces **Review**, not Failed
+- the raw provider result becomes the visible final fallback when local post-processing fails
+- automatic AI rerouting is blocked for a local post-processing error so a code bug does not cause another paid request
+- Gemini authentication uses the `x-goog-api-key` header instead of a `?key=` URL parameter
+- remote MathJax is pinned to `3.2.2` rather than the floating `@3` tag
+- `.github/workflows/browser-smoke.yml` now runs browser regression tests on pushes to main and pull requests
+- `tests/browser-smoke.mjs` executes the built-in self-tests, a mocked math transcription through the normal batch UI, a forced post-processing crash, and Gemini-auth request inspection
+
+This hotfix reinforces the core rule:
+
+**A paid/successful provider response is evidence and must be preserved before any local transformation can fail.**
+
 Recommended remaining work is now a hardening / optional backlog rather than an undefined Upgrade 11:
 
 - durable queue support for in-flight targeted-region requests
@@ -723,9 +748,11 @@ The application now provides live source + rendered MathJax preview.
 
 Current implementation loads MathJax on demand for live preview and also uses a detached print/PDF window for export.
 
+The remote URL is pinned to MathJax `3.2.2`; it no longer floats on the `@3` major tag.
+
 Important security follow-up:
 
-The older handoff prohibited all remote MathJax loading on the main API-key page. Upgrade 4 introduced on-demand main-page loading for live preview. Before treating this as production-hardened, strongly consider bundling/self-hosting MathJax or otherwise eliminating reliance on third-party remote script execution on a page where API keys may be entered.
+The older handoff prohibited all remote MathJax loading on the main API-key page. Upgrade 4 introduced on-demand main-page loading for live preview. Pinning reduces supply-chain drift, but before treating this as production-hardened, strongly consider bundling/self-hosting MathJax or otherwise eliminating reliance on third-party remote script execution on a page where API keys may be entered.
 
 Regardless of renderer behavior:
 
@@ -1059,6 +1086,13 @@ Diagnostics should remain action-oriented.
 32. page/region review packages omitting provenance needed to reproduce review decisions.
 33. archive export silently dropping original images or targeted crop evidence when those bytes are available.
 34. cost estimates being presented as provider billing truth.
+35. an over-escaped dynamic LaTeX-repair RegExp crashing on ordinary math spans.
+36. a repair/validator exception being mislabeled as an API/browser failure.
+37. successful provider raw text being assigned only after post-processing succeeds.
+38. a local post-processing bug triggering automatic Secondary spend.
+39. Gemini API keys appearing in request URLs.
+40. built-in self-tests existing in source but never being executed by CI.
+41. MathJax returning to a floating CDN major-version URL.
 
 ---
 
@@ -1195,3 +1229,5 @@ Each upgrade should:
 6. avoid destroying history
 7. retain safe recovery after interruption
 8. update this handoff and the upgrade plan when architecture changes materially
+9. run the browser smoke suite for any change touching transcription, math repair/validation, provider adapters, routing, persistence, or export
+10. treat JavaScript parse success as only a preliminary check; the normal math happy path must execute in a browser
