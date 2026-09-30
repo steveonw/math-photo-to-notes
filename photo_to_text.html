@@ -618,7 +618,7 @@ function syncProvider(which=1,reset=true){
 els.provider.addEventListener('change',()=>syncProvider(1,true));
 els.provider2.addEventListener('change',()=>syncProvider(2,true));
 [els.model,els.baseurl,els.model2,els.baseurl2,els.prompt].forEach(x=>x.addEventListener('change',saveSettings));
-['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai','concurrency','auto-routing','auto-max-attempts','auto-cache-policy','rate-primary-input','rate-primary-output','rate-secondary-input','rate-secondary-output'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',()=>{saveSettings();renderQueueStatus()})});
+['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai','concurrency','auto-routing','auto-max-attempts','auto-cache-policy','rate-primary-input','rate-primary-output','rate-secondary-input','rate-secondary-output'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',()=>{saveSettings();renderQueueStatus();renderUsageSummary()})});
 $('auto-routing')?.addEventListener('change',()=>{if(!autoRoutingEnabled())cancelPendingAutoRoutes()});
 
 async function addFiles(list){
@@ -1093,6 +1093,7 @@ function render(){
  renderStats();
  renderQueueStatus();
  renderOrganizationControls();
+ renderUsageSummary();
  const allList=visibleItems();
  syncGuidedItem(allList);
  let list=allList;
@@ -1991,6 +1992,11 @@ async function runA2SelfTests(){
  depPage.regions=[depRegion];markNeedsRefresh(depPage,depRegion,'test');
  test('targeted result can mark Needs Refresh without changing text',depPage.classification==='needsrefresh'&&depRegion.needsRefresh===true);
  test('region disagreement comparison is conservative',normalizeRegionText('x + 1')!==normalizeRegionText('x - 1'));
+ const usageProbe=usageTokenCounts('openai',{input_tokens:12,output_tokens:7,total_tokens:19});
+ test('usage normalization reads input/output tokens',usageProbe.input===12&&usageProbe.output===7&&usageProbe.total===19);
+ test('exported safe settings omit API keys',!/apiKey|apikey/i.test(JSON.stringify(safeProjectSettings())));
+ const zipProbe=buildStoreZip([{name:'test.txt',bytes:utf8Bytes('ok')}]);
+ test('ZIP writer returns an archive blob',zipProbe instanceof Blob&&zipProbe.size>20);
  return {passed:tests.filter(x=>x.ok).length,total:tests.length,tests};
 }
 
@@ -2018,6 +2024,7 @@ async function runDoctor(){
    ['Interrupted jobs',String(interrupted)],
    ['Targeted regions',String(state.items.reduce((n,i)=>n+(i.regions?.length||0),0))],
    ['Needs Refresh pages',String(state.items.filter(i=>i.classification==='needsrefresh'||i.needsRefresh).length)],
+   ['Recorded usage',(()=>{const t=buildUsageReport(state.items).totals;return t.input+' input / '+t.output+' output tokens / est. USD '+t.estimatedCost.toFixed(4)})()],
    ['Self-tests',selfTests.passed+'/'+selfTests.total+' passed'],
    ['Primary',p.provider+' / '+(p.model||'(model missing)')],
    ['Primary key',p.apiKey?'Present (not stored)':'Missing'],
@@ -2211,6 +2218,44 @@ function sanitizedPageRecord(i,includeImages=false){
  delete x.runningPasses;delete x.cropDataUrl;
  return x;
 }
+function usageTokenCounts(provider,usage){
+ const u=usage||{};
+ const input=Number(u.input_tokens??u.prompt_tokens??u.promptTokenCount??u.inputTokens??0)||0;
+ const output=Number(u.output_tokens??u.completion_tokens??u.candidatesTokenCount??u.outputTokens??0)||0;
+ const total=Number(u.total_tokens??u.totalTokenCount??u.totalTokens??(input+output))||input+output;
+ return {input,output,total};
+}
+function currentRates(){
+ return {
+   primary:{input:Number($('rate-primary-input')?.value||0),output:Number($('rate-primary-output')?.value||0)},
+   secondary:{input:Number($('rate-secondary-input')?.value||0),output:Number($('rate-secondary-output')?.value||0)}
+ };
+}
+function usageCost(pass,counts,rates=currentRates()){
+ const r=rates[pass]||{input:0,output:0};
+ return counts.input*r.input/1e6+counts.output*r.output/1e6;
+}
+function buildUsageReport(list=state.items){
+ const rates=currentRates(),events=[];
+ for(const i of list){
+   const logs=(i.usageLog&&i.usageLog.length)?i.usageLog:(i.usage?[{at:'',scope:'page',pass:i.lastPass||'primary',provider:i.lastProvider||'',model:i.lastModel||'',usage:i.usage,cached:false,legacy:true}]:[]);
+   for(const log of logs){
+     const counts=usageTokenCounts(log.provider,log.usage),cost=log.cached?0:usageCost(log.pass||'primary',counts,rates);
+     events.push({pageId:i.id,pageName:i.name,scope:log.scope||'page',pass:log.pass||'primary',provider:log.provider||'',model:log.model||'',at:log.at||'',cached:!!log.cached,legacy:!!log.legacy,...counts,estimatedCost:cost});
+   }
+   for(const region of i.regions||[])for(const res of region.results||[]){
+     const counts=usageTokenCounts(res.provider,res.usage),cost=usageCost(res.pass||'primary',counts,rates);
+     events.push({pageId:i.id,pageName:i.name,scope:'region',regionId:region.id,regionNote:region.note||'',pass:res.pass||'primary',provider:res.provider||'',model:res.model||'',at:res.at||'',cached:false,...counts,estimatedCost:cost});
+   }
+ }
+ const totals=events.reduce((a,e)=>{a.input+=e.input;a.output+=e.output;a.total+=e.total;a.estimatedCost+=e.estimatedCost;if(!e.cached)a.billableCalls++;return a},{input:0,output:0,total:0,estimatedCost:0,billableCalls:0});
+ return {schema:'math-photo-notes-usage-v1',generatedAt:new Date().toISOString(),ratesPerMillionTokens:rates,totals,events};
+}
+function renderUsageSummary(){
+ const el=$('usage-summary');if(!el)return;
+ const t=buildUsageReport(state.items).totals;
+ el.textContent=t.total?(t.input.toLocaleString()+' input / '+t.output.toLocaleString()+' output / est. USD '+t.estimatedCost.toFixed(4)+' / '+t.billableCalls+' AI call'+(t.billableCalls===1?'':'s')):'No recorded usage yet';
+}
 function auditManifest(list=state.items){
  return {
    schema:'math-photo-notes-audit-v1',generatedAt:new Date().toISOString(),projectSchema:PROJECT_SCHEMA,
@@ -2313,6 +2358,7 @@ $('open-project').onclick=()=>$('open-project-file').click();
 $('open-project-file').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)importProjectFile(file)};
 $('download-txt').onclick=()=>download('photo-to-text-all.txt',plainTextFor(state.items.filter(i=>i.text)));
 $('download-tex').onclick=()=>download('photo-to-text-all.tex',texFor(state.items.filter(i=>i.text)),'application/x-tex;charset=utf-8');
+$('usage-report').onclick=()=>download('photo-to-text-usage-report.json',JSON.stringify(buildUsageReport(state.items),null,2),'application/json;charset=utf-8');
 
 $('download-all').onclick=()=>download('photo-to-text-all.md',mdFor(state.items.filter(i=>i.text)));
 $('download-review').onclick=()=>download('photo-to-text-review.md',mdFor(state.items.filter(i=>i.classification==='review')));
