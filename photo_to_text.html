@@ -1167,7 +1167,7 @@ async function runOne(i,s,{forceFresh=false}={}){
  }finally{
    if(i.activeAttemptId===attemptId)i.activeAttemptId='';
    state.activeControllers.delete(i.id);
-   if(!state.queuePlan&&!state.activeControllers.size)state.running=false;
+   if(!state.queuePlan&&!state.activeControllers.size){state.running=false;queueButtonsDisabled(false)}
    scheduleAutosave();render();
  }
 }
@@ -1188,6 +1188,7 @@ function queueButtonsDisabled(disabled){
  ['run','retry-current-primary','retry-review','retry-unclear','retry-mathunsure','retry-failed'].forEach(id=>{const b=$(id);if(b)b.disabled=!!disabled});
 }
 function startQueue(list,s){
+ if(state.queuePlan){alert('A saved queue already exists. Resume or cancel it before starting another queue.');return}
  if(state.running||state.activeControllers.size){alert('A queue or request is already running.');return}
  if(!list.length){alert('There are no items in this pile to process.');return}
  if(!s)s=snapPrimary();
@@ -1276,6 +1277,10 @@ async function runA2SelfTests(){
  test('MATH_UNSURE routes to Math Unsure',classifyText('[MATH_UNSURE: seen="?" guess="$x$" note="test"] (I think it says: $x$)').classification==='mathunsure');
  test('explicit unclear routes to Unclear',classifyText('word [unclear] word word word word').classification==='unclear');
  test('unbalanced math delimiter is detected',latexStructuralWarnings('\\(x+1').length>0);
+ const rateLimitTest=providerHttpError({status:429,headers:{get:()=>null}},{error:{message:'rate'}},'rate');
+ test('HTTP 429 is transient',isTransientError(rateLimitTest)===true);
+ const authTest=providerHttpError({status:401,headers:{get:()=>null}},{error:{message:'auth'}},'auth');
+ test('HTTP 401 is not transient',isTransientError(authTest)===false);
  try{validateProjectEnvelope({schema:PROJECT_SCHEMA,version:1,items:[]});test('project schema validates',true)}catch(e){test('project schema validates',false)}
  try{validateProjectEnvelope({schema:'bad-schema',items:[]});test('unknown project schema is rejected',false)}catch(e){test('unknown project schema is rejected',true)}
  if(crypto?.subtle){
@@ -1476,7 +1481,7 @@ $('clear').onclick=async()=>{if(!confirm('Clear all loaded images and results?')
 
 loadSettings();
 restoreProjectState().then(()=>{
- if(state.queuePlan){state.queuePaused=true;state.running=false;queueButtonsDisabled(false)}
+ if(state.queuePlan){state.queuePaused=true;state.running=false;queueButtonsDisabled(true)}
  const active=document.querySelector('#tabs button[data-filter="'+state.filter+'"]');
  if(active)document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===active));
  render();
