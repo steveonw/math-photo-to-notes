@@ -685,19 +685,39 @@ Acceptance criteria:
 
 ## Release B — Good Spot Checks
 
-1. random Good-page sampling
-2. spot-check review UI
-3. OK/Error result capture
-4. error categories/notes
-5. persistent reliability ledger
-6. model/prompt/processing provenance
-7. reliability summary counts
+**Status:** Implemented on 2026-09-30.
 
-### Acceptance criteria
+Implemented:
 
-- spot-check results survive reload/project Save/Open
+1. batch summaries can launch random Good-page spot checks
+2. sample size is selectable: 1 / 5 / 10 / 20
+3. previously checked Good pages are excluded from normal sampling
+4. sampled page IDs are persisted with the active spot-check session
+5. each page is reviewed source-image vs current final transcription
+6. human outcomes are **Looks OK** or **Record error**
+7. optional error categories cover wrong digits, signs/operators, exponents/subscripts, symbols/Greek letters, missing/extra text, formatting/LaTeX, and other
+8. optional human notes are stored
+9. Error-found pages move from Good to Review without changing transcription text
+10. OK does not approve a page
+11. every evidence record stores page/batch/session IDs, image hash, final-text hash, provider/model/pass, prompt fingerprint, processing fingerprint, Auto-fix setting, High Assurance setting, timestamp, outcome, category, and note
+12. processing now stamps prompt fingerprint and batch assurance provenance on pages
+13. spot-check ledger and active session persist through autosave and project Save/Open
+14. accumulated evidence is grouped by provider/model/prompt fingerprint
+15. UI reports raw human-reviewed counts, never a formal accuracy percentage
+16. spot-check evidence is included in project archives and audit counts
+17. spot-check evidence can be downloaded directly as JSON
+18. Doctor reports human Good-page checks and errors found
+19. browser CI verifies OK persistence/provenance and Error-found → Review behavior without transcription mutation
+
+Acceptance criteria:
+
+- spot-check results survive project serialization/hydration
 - historical counts are tied to model + prompt fingerprint
-- no claim of formal accuracy percentage
+- sampled IDs survive in the active session
+- a human-found error cannot remain silently in Good
+- no formal accuracy percentage is claimed
+
+**Next active release:** Release C — External AI Round Trip.
 
 ---
 
