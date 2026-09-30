@@ -39,6 +39,8 @@ await new Promise((resolve,reject)=>{
 const browser=await chromium.launch({headless:true});
 const appUrl='http://'+host+':'+port+'/photo_to_text.html';
 const mathResponse='The derivative of $x^2$ is $2x$, and this sentence contains enough ordinary words for a good classification.';
+let anthropicResponse=mathResponse;
+let anthropicCalls=0;
 const pngBase64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQwAAAABJRU5ErkJggg==';
 
 function assert(ok,message){if(!ok)throw new Error(message)}
@@ -60,11 +62,12 @@ async function newPage(){
       'access-control-allow-methods':'POST, OPTIONS'
     };
     if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers:cors,body:''});
+    anthropicCalls++;
     return route.fulfill({
       status:200,
       headers:{...cors,'content-type':'application/json'},
       body:JSON.stringify({
-        content:[{type:'text',text:mathResponse}],
+        content:[{type:'text',text:anthropicResponse}],
         stop_reason:'end_turn',
         usage:{input_tokens:11,output_tokens:23}
       })
@@ -135,6 +138,8 @@ try{
 
   // Normal end-to-end mocked provider path with LaTeX.
   {
+    anthropicResponse=mathResponse;
+    anthropicCalls=0;
     const {context,page}=await newPage();
     await addFixture(page,'math-fixture.png');
     const item=await processOne(page);
@@ -145,8 +150,31 @@ try{
     await context.close();
   }
 
+  // Release A: Quick Transcribe must stop after one semantic pass when Auto-fix is off.
+  {
+    anthropicResponse='Only a few words';
+    anthropicCalls=0;
+    const {context,page}=await newPage();
+    await page.evaluate(()=>{document.getElementById('auto-routing').checked=false});
+    await addFixture(page,'quick-transcribe-review.png');
+    const item=await processOne(page);
+    await page.waitForFunction(()=>!document.getElementById('batch-summary').classList.contains('hidden'),null,{timeout:15000});
+    const summary=await page.locator('#batch-summary').innerText();
+    assert(item.badge==='Review','Quick Transcribe fixture should land in Review, got '+item.badge);
+    assert(anthropicCalls===1,'Quick Transcribe made '+anthropicCalls+' Anthropic calls; expected exactly one semantic pass');
+    assert(/Quick Transcribe/i.test(summary),'Batch summary did not identify Quick Transcribe');
+    assert(/Review/i.test(summary),'Batch summary did not include the Review pile');
+    assert(/no automatic warning signals/i.test(summary),'Batch summary did not explain what Good means');
+    const autoFixLabel=await page.locator('label.mode-toggle').first().innerText();
+    assert(/Auto-fix flagged pages/i.test(autoFixLabel),'Release A Auto-fix label is missing');
+    await context.close();
+    anthropicResponse=mathResponse;
+  }
+
   // Successful provider output must survive a local post-processing crash.
   {
+    anthropicResponse=mathResponse;
+    anthropicCalls=0;
     const {context,page}=await newPage();
     await page.evaluate(()=>{repairLatexForMathJax=()=>{throw new Error('forced post-processing crash')}}); // intentional test fault
     await addFixture(page,'post-process-crash.png');
