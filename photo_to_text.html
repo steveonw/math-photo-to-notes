@@ -2099,7 +2099,7 @@ function regionQueuedPasses(pageId,regionId){
  return [...new Set(jobs.filter(j=>j.kind==='region'&&j.id===pageId&&j.regionId===regionId&&(j.state==='pending'||j.state==='running')).map(j=>j.pass))];
 }
 function regionHasQueueWork(pageId,regionId){return regionQueuedPasses(pageId,regionId).length>0}
-async function runRegionPass(pageId,regionId,pass,options={}){
+async function executeRegionPass(pageId,regionId,pass,options={}){
  const page=state.items.find(x=>x.id===pageId),region=page?.regions?.find(x=>x.id===regionId);if(!page||!region)return null;
  if((state.queuePlan||state.running)&&!options.fromQueue){if(!options.silent)alert('Finish or cancel the current queue before starting another targeted-region job.');return null}
  if(!options.fromQueue&&!options.allowConcurrent&&state.activeControllers.size){if(!options.silent)alert('Another AI request is already running.');return null}
@@ -2526,7 +2526,7 @@ function pumpQueue(){
    item.lastBatchId=plan.id||'';item.lastAutoFixEnabled=!!plan.autoFixAtStart;item.lastHighAssurance=!!plan.highAssuranceAtStart;item.lastHighAssurancePolicy=plan.highAssurancePolicy||'';
    scheduleAutosave();renderQueueStatus();
    const runner=job.kind==='region'
-     ?runRegionPass(item.id,job.regionId,job.pass,{fromQueue:true,silent:true,allowConcurrent:true,snap:jobSnap}).then(rec=>({outcome:rec?'done':'region-failed',classification:item.classification,regionResultId:rec?.id||''}))
+     ?executeRegionPass(item.id,job.regionId,job.pass,{fromQueue:true,silent:true,allowConcurrent:true,snap:jobSnap}).then(rec=>({outcome:rec?'done':'region-failed',classification:item.classification,regionResultId:rec?.id||''}))
      :(job.highAssuranceVerify?runHighAssuranceVerification(item,jobSnap,job):runOne(item,jobSnap,{forceFresh:!!job.forceFresh}));
    runner.then(async result=>{
      if(state.queuePlan!==plan)return;
