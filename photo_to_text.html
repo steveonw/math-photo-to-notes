@@ -1123,6 +1123,148 @@ function buildBatchSummary(plan){
    counts:batchSummaryCounts(pageIds)
  };
 }
+const SPOTCHECK_ERROR_CATEGORIES=[
+ ['wrong-digit','Wrong digit'],
+ ['dropped-sign','Dropped / wrong sign or operator'],
+ ['exponent-subscript','Exponent / subscript error'],
+ ['symbol-greek','Symbol / Greek-letter error'],
+ ['missing-text','Missing text'],
+ ['extra-text','Extra text'],
+ ['formatting-latex','Formatting / LaTeX only'],
+ ['other','Other']
+];
+function spotCheckedPageIds(){return new Set((state.spotCheckLedger||[]).map(x=>x.pageId))}
+function eligibleGoodSpotCheckPages(scopePageIds,{allowRepeat=false}={}){
+ const scope=Array.isArray(scopePageIds)?new Set(scopePageIds):null;
+ const checked=allowRepeat?new Set():spotCheckedPageIds();
+ return state.items.filter(i=>(!scope||scope.has(i.id))&&i.classification==='good'&&i.status==='done'&&!checked.has(i.id));
+}
+function randomSampleWithoutReplacement(list,count){
+ const a=[...list];
+ for(let i=a.length-1;i>0;i--){
+   let j=0;
+   if(crypto?.getRandomValues){const x=new Uint32Array(1);crypto.getRandomValues(x);j=x[0]%(i+1)}
+   else j=Math.floor(Math.random()*(i+1));
+   [a[i],a[j]]=[a[j],a[i]];
+ }
+ return a.slice(0,Math.max(0,Math.min(Number(count)||0,a.length)));
+}
+function startGoodSpotCheck(scopePageIds,count=5,{allowRepeat=false}={}){
+ if(state.running||state.queuePlan){alert('Finish or pause processing before starting a Good-page spot-check.');return}
+ const pool=eligibleGoodSpotCheckPages(scopePageIds,{allowRepeat});
+ if(!pool.length){
+   alert(allowRepeat?'There are no Good pages available to spot-check.':'All Good pages in this scope have already been spot-checked, or there are no Good pages.');
+   return;
+ }
+ const sample=randomSampleWithoutReplacement(pool,Math.max(1,Number(count)||5));
+ const batchId=state.lastBatchSummary?.id&&Array.isArray(scopePageIds)&&scopePageIds.includes?.(state.lastBatchSummary.pageIds?.[0])?state.lastBatchSummary.id:'';
+ state.spotCheckSession={
+   id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random(),
+   batchId,startedAt:new Date().toISOString(),completedAt:'',
+   requestedCount:Number(count)||5,pageIds:sample.map(i=>i.id),index:0,
+   scopePageIds:Array.isArray(scopePageIds)?[...scopePageIds]:[],
+   allowRepeat:!!allowRepeat
+ };
+ scheduleAutosave();render();
+ setTimeout(()=>window.scrollTo({top:$('spotcheck-panel')?.offsetTop||0,behavior:'smooth'}),0);
+}
+function currentSpotCheckPage(){
+ const s=state.spotCheckSession;if(!s||!Array.isArray(s.pageIds))return null;
+ return state.items.find(i=>i.id===s.pageIds[s.index])||null;
+}
+function spotCheckSessionRecords(sessionId){
+ return (state.spotCheckLedger||[]).filter(x=>x.sessionId===sessionId);
+}
+function reliabilityGroups(){
+ const map=new Map();
+ for(const r of state.spotCheckLedger||[]){
+   const key=[r.provider||'unknown',r.model||'unknown',r.promptFingerprint||'no-prompt-hash'].join('|');
+   if(!map.has(key))map.set(key,{key,provider:r.provider||'unknown',model:r.model||'unknown',promptFingerprint:r.promptFingerprint||'',ok:0,error:0,total:0,lastAt:''});
+   const g=map.get(key);g.total++;if(r.outcome==='ok')g.ok++;else if(r.outcome==='error')g.error++;
+   if((r.at||'')>g.lastAt)g.lastAt=r.at||'';
+ }
+ return [...map.values()].sort((a,b)=>b.total-a.total||String(b.lastAt).localeCompare(String(a.lastAt)));
+}
+async function recordSpotCheck(outcome){
+ const session=state.spotCheckSession,page=currentSpotCheckPage();if(!session||!page)return;
+ if(!['ok','error'].includes(outcome))return;
+ const category=outcome==='error'?($('spotcheck-error-category')?.value||'other'):'';
+ const note=String($('spotcheck-note')?.value||'').trim();
+ const text=page.finalText||page.text||'';
+ const rec={
+   id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random(),
+   at:new Date().toISOString(),sessionId:session.id,batchId:session.batchId||page.lastBatchId||'',
+   pageId:page.id,pageName:page.name,imageHash:page.imageHash||'',
+   finalTextHash:await sha256Hex(text),
+   provider:page.lastProvider||'',model:page.lastModel||'',pass:page.lastPass||'',
+   promptFingerprint:page.lastPromptFingerprint||'',processingFingerprint:page.lastFingerprint||'',
+   autoFix:!!page.lastAutoFixEnabled,highAssurance:!!page.lastHighAssurance,
+   classificationAtCheck:page.classification,outcome,errorCategory:category,note
+ };
+ state.spotCheckLedger=state.spotCheckLedger||[];state.spotCheckLedger.push(rec);
+ if(state.spotCheckLedger.length>5000)state.spotCheckLedger.shift();
+ if(outcome==='error'){
+   page.classification='review';page.status='done';
+   page.reason='Human Good-page spot-check found an error'+(category?' ('+SPOTCHECK_ERROR_CATEGORIES.find(x=>x[0]===category)?.[1]+')':'')+'. Review or correct this page before approval.';
+ }
+ session.index++;
+ if(session.index>=session.pageIds.length)session.completedAt=new Date().toISOString();
+ scheduleAutosave();render();
+}
+function skipSpotCheck(){
+ const s=state.spotCheckSession;if(!s)return;
+ s.index++;if(s.index>=s.pageIds.length)s.completedAt=new Date().toISOString();
+ scheduleAutosave();render();
+}
+function closeSpotCheck(){state.spotCheckSession=null;scheduleAutosave();render()}
+function renderSpotCheckPanel(){
+ const box=$('spotcheck-panel');if(!box)return;
+ const s=state.spotCheckSession;
+ if(!s){box.classList.add('hidden');box.innerHTML='';return}
+ const records=spotCheckSessionRecords(s.id),ok=records.filter(x=>x.outcome==='ok').length,errors=records.filter(x=>x.outcome==='error').length;
+ if(s.index>=s.pageIds.length||s.completedAt){
+   box.classList.remove('hidden');
+   box.innerHTML='<h2 style="margin:0 0 6px">Spot-check complete</h2>'+
+     '<div>'+records.length+' page'+(records.length===1?'':'s')+' reviewed · '+ok+' marked OK · '+errors+' error'+(errors===1?'':'s')+' found.</div>'+
+     '<div class="small" style="margin-top:6px">These are human-reviewed counts, not a formal accuracy percentage.</div>'+
+     '<div class="spotcheck-controls"><button id="spotcheck-close">Close spot-check</button></div>';
+   $('spotcheck-close').onclick=()=>closeSpotCheck();return;
+ }
+ const page=currentSpotCheckPage();
+ if(!page){s.index++;scheduleAutosave();render();return}
+ const categoryOptions=SPOTCHECK_ERROR_CATEGORIES.map(([v,l])=>'<option value="'+esc(v)+'">'+esc(l)+'</option>').join('');
+ box.classList.remove('hidden');
+ box.innerHTML='<h2 style="margin:0">Good-page spot-check</h2>'+
+   '<div class="small">Page '+(s.index+1)+' of '+s.pageIds.length+' · This review does not approve the page.</div>'+
+   '<div class="spotcheck-grid">'+
+     '<div><div class="name">'+esc(page.name)+'</div>'+
+       (page.url?'<div class="spotcheck-image"><img src="'+page.url+'" alt="'+esc(page.name)+'"></div>':'<div class="reason">Original image is unavailable in this restored project.</div>')+
+       '<div class="small" style="margin-top:7px">'+esc(page.lastProvider||'')+' · '+esc(page.lastModel||'')+' · '+esc(page.lastPass||'')+'</div></div>'+
+     '<div><b>Current final transcription</b><div class="spotcheck-text">'+esc(page.finalText||page.text||'')+'</div></div>'+
+   '</div>'+
+   '<div class="spotcheck-controls">'+
+     '<button class="primary" id="spotcheck-ok">Looks OK</button>'+
+     '<label><span class="label">If error found, category</span><select id="spotcheck-error-category">'+categoryOptions+'</select></label>'+
+     '<label style="flex:1;min-width:240px"><span class="label">Optional note</span><input id="spotcheck-note" placeholder="What was wrong?"></label>'+
+     '<button id="spotcheck-error">Record error</button>'+
+     '<button id="spotcheck-skip">Skip for now</button>'+
+     '<button id="spotcheck-close">Close</button>'+
+   '</div>';
+ $('spotcheck-ok').onclick=()=>recordSpotCheck('ok');
+ $('spotcheck-error').onclick=()=>recordSpotCheck('error');
+ $('spotcheck-skip').onclick=()=>skipSpotCheck();
+ $('spotcheck-close').onclick=()=>closeSpotCheck();
+}
+function renderReliabilitySummary(){
+ const box=$('reliability-summary');if(!box)return;
+ const ledger=state.spotCheckLedger||[];
+ if(!ledger.length){box.classList.add('hidden');box.innerHTML='';return}
+ const ok=ledger.filter(x=>x.outcome==='ok').length,errors=ledger.filter(x=>x.outcome==='error').length,groups=reliabilityGroups().slice(0,5);
+ box.classList.remove('hidden');
+ box.innerHTML='<b>Spot-check evidence</b> · '+ledger.length+' human-reviewed Good page'+(ledger.length===1?'':'s')+' · '+ok+' marked OK · '+errors+' error'+(errors===1?'':'s')+' found.'+
+   '<div class="small" style="margin-top:4px">Counts are operational evidence, not a formal accuracy percentage.</div>'+
+   '<div class="reliability-groups">'+groups.map(g=>'<div class="reliability-row"><b>'+esc(g.provider)+' · '+esc(g.model)+'</b> · '+g.total+' checked · '+g.ok+' OK · '+g.error+' error'+(g.error===1?'':'s')+'<br><span class="small">Prompt '+esc((g.promptFingerprint||'unavailable').slice(0,12))+(g.promptFingerprint?'…':'')+'</span></div>').join('')+'</div>';
+}
 function renderBatchSummary(){
  const box=$('batch-summary');if(!box)return;
  const summary=state.lastBatchSummary;
@@ -1147,13 +1289,15 @@ function renderBatchSummary(){
    '</div>'+
    '<div class="batch-summary-note"><b>Good means no automatic warning signals were detected.</b> It does not mean independently verified or guaranteed correct.</div>'+
    '<div class="batch-summary-actions">'+
+     '<label style="display:flex;align-items:center;gap:6px;margin:0"><span class="small">Spot-check</span><select id="summary-spotcheck-count" style="width:auto"><option value="1">1</option><option value="5" selected>5</option><option value="10">10</option><option value="20">20</option></select><button id="summary-spotcheck-good"'+(counts.good?'':' disabled')+'>Good pages</button></label>'+
      '<button id="summary-review-flagged"'+(flagged?'':' disabled')+'>Review '+flagged+' flagged page'+(flagged===1?'':'s')+'</button>'+
      '<button id="summary-resume-interrupted"'+(interrupted?'':' disabled')+'>Resume '+interrupted+' interrupted</button>'+
      '<button id="summary-retry-failed"'+(retryableFailed?'':' disabled')+'>Retry '+retryableFailed+' failed</button>'+
      (configBlocked?'<span class="small" style="align-self:center">'+configBlocked+' failed page'+(configBlocked===1?' needs':'s need')+' configuration or a different AI choice.</span>':'')+
      '<button id="summary-export-all">Export everything</button>'+
    '</div>';
- const review=$('summary-review-flagged'),resume=$('summary-resume-interrupted'),retry=$('summary-retry-failed'),exp=$('summary-export-all');
+ const spot=$('summary-spotcheck-good'),review=$('summary-review-flagged'),resume=$('summary-resume-interrupted'),retry=$('summary-retry-failed'),exp=$('summary-export-all');
+ if(spot)spot.onclick=()=>startGoodSpotCheck(summary.pageIds,Number($('summary-spotcheck-count')?.value||5));
  if(review)review.onclick=()=>openBatchFlaggedReview(summary.pageIds);
  if(resume)resume.onclick=()=>resumeBatchInterrupted(summary.pageIds);
  if(retry)retry.onclick=()=>retryBatchFailed(summary.pageIds);
@@ -1206,6 +1350,8 @@ function render(){
  renderStats();
  renderQueueStatus();
  renderBatchSummary();
+ renderSpotCheckPanel();
+ renderReliabilitySummary();
  renderOrganizationControls();
  renderUsageSummary();
  const allList=state.guidedReview?currentGuidedList():visibleItems();
@@ -2155,6 +2301,12 @@ async function runA2SelfTests(){
  const summaryProbe={id:'batch-test',pageIds:['a','b'],label:'Quick Transcribe',showSummary:true};
  test('batch summary preserves unique run page IDs',buildBatchSummary(summaryProbe).pageIds.length===2);
  test('Quick Transcribe auto-fix is opt-in',autoRoutingEnabled()===!!$('auto-routing')?.checked);
+ const originalItems=state.items,originalLedger=state.spotCheckLedger;
+ state.items=[{id:'g1',classification:'good',status:'done'},{id:'g2',classification:'good',status:'done'},{id:'r1',classification:'review',status:'done'}];
+ state.spotCheckLedger=[{pageId:'g1',outcome:'ok'}];
+ test('spot-check sampling excludes previously checked Good pages',eligibleGoodSpotCheckPages(['g1','g2']).map(x=>x.id).join(',')==='g2');
+ state.items=originalItems;state.spotCheckLedger=originalLedger;
+ test('reliability summary uses counts, not an accuracy field',!('accuracy' in (reliabilityGroups()[0]||{})));
  return {passed:tests.filter(x=>x.ok).length,total:tests.length,tests};
 }
 
@@ -2182,6 +2334,7 @@ async function runDoctor(){
    ['Interrupted jobs',String(interrupted)],
    ['Targeted regions',String(state.items.reduce((n,i)=>n+(i.regions?.length||0),0))],
    ['Needs Refresh pages',String(state.items.filter(i=>i.classification==='needsrefresh'||i.needsRefresh).length)],
+   ['Good-page spot checks',(()=>{const l=state.spotCheckLedger||[];return l.length+' checked / '+l.filter(x=>x.outcome==='error').length+' errors found'})()],
    ['Recorded usage',(()=>{const t=buildUsageReport(state.items).totals;return t.input+' input / '+t.output+' output tokens / est. USD '+t.estimatedCost.toFixed(4)})()],
    ['Self-tests',selfTests.passed+'/'+selfTests.total+' passed'],
    ['Primary',p.provider+' / '+(p.model||'(model missing)')],
@@ -2423,6 +2576,7 @@ function auditManifest(list=state.items){
  return {
    schema:'math-photo-notes-audit-v1',generatedAt:new Date().toISOString(),projectSchema:PROJECT_SCHEMA,
    pageCount:list.length,documentCount:state.documents.length,
+   spotChecks:{total:(state.spotCheckLedger||[]).length,ok:(state.spotCheckLedger||[]).filter(x=>x.outcome==='ok').length,error:(state.spotCheckLedger||[]).filter(x=>x.outcome==='error').length},
    pages:list.map(i=>({
      id:i.id,name:i.name,documentId:i.documentId||'',documentName:documentName(i.documentId),order:i.order,
      classification:i.classification,status:i.status,imageHash:i.imageHash||'',lastFingerprint:i.lastFingerprint||'',
@@ -2445,6 +2599,7 @@ async function archiveEntriesForPages(list,{includeProject=false}={}){
  entries.push({name:'README.txt',bytes:utf8Bytes('Math Photo to Notes portable archive\nGenerated: '+new Date().toISOString()+'\n\nAPI keys are intentionally excluded.\n')});
  entries.push({name:'audit-manifest.json',bytes:jsonBytes(auditManifest(list))});
  entries.push({name:'usage-report.json',bytes:jsonBytes(buildUsageReport(list))});
+ entries.push({name:'spot-check-ledger.json',bytes:jsonBytes(state.spotCheckLedger||[])});
  entries.push({name:'exports/combined.md',bytes:utf8Bytes(mdFor(list.filter(i=>i.text)))});
  entries.push({name:'exports/combined.txt',bytes:utf8Bytes(plainTextFor(list.filter(i=>i.text)))});
  entries.push({name:'exports/combined.tex',bytes:utf8Bytes(texFor(list.filter(i=>i.text)))});
