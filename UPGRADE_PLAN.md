@@ -1,445 +1,599 @@
-# Photo-to-Text Upgrade Specification
+# Math Photo to Notes — Product Roadmap
 
-## 1. Goal
+## 1. Current Status
 
-Upgrade the current browser-based photo-to-text tool into a reliable bulk note-processing system for handwritten and printed notes, with special support for mathematical notation.
+The original Upgrade 1–10 roadmap is complete.
 
-The system should prioritize:
+The project already has the difficult foundation:
 
-- transcription accuracy
-- preservation of mathematical notation
-- visible uncertainty instead of silent guessing
-- low-cost first-pass processing
-- selective use of stronger AI models
-- easy human review
-- safe LaTeX repair
-- batch organization
-- export to Markdown, LaTeX, and PDF
-- preservation of earlier AI results so nothing useful is lost
+- raw / repaired / final transcription lineage
+- revision history
+- Approved / Needs Reapproval / Needs Refresh
+- conservative LaTeX repair and validation
+- browser regression CI for the math happy path
+- Primary and Secondary AI configurations
+- durable whole-page queue with concurrency, pause/resume/cancel, timeout, Retry-After, and transient backoff
+- bounded automatic routing with loop prevention
+- exact-result caching and processing fingerprints
+- Guided Review with image/transcription side-by-side review
+- anchored review flags
+- document/notebook organization and page ordering
+- targeted equation/region retries and Primary/Secondary disagreement review
+- project Save/Open
+- archive/review-package exports
+- usage/cost reporting and audit manifests
 
----
-
-# PART 1 — Core Reliability
-
-## 1.1 Processing states
-
-Every image should belong to one of these states:
-
-### Queued
-Not processed yet.
-
-### Running
-Currently being processed.
-
-### Good
-No automatic warning signals were found.
-
-### Review
-The transcription completed but has suspicious characteristics.
-
-Examples:
-
-- unusually short output
-- garbled characters
-- incomplete-looking output
-- formatting anomalies
-- possible model truncation
-
-### Unclear
-The AI explicitly reports unreadable non-mathematical text.
-
-Example:
-
-`[unclear]`
-
-### Math Unsure
-The AI is uncertain about mathematical notation.
-
-Example:
-
-`[MATH_UNSURE: seen="x ? 4" guess="$x+4$" note="operator could be + or -"] (I think it says: $x+4$)`
-
-### Failed
-The API request or processing operation failed.
-
-### Approved
-A human reviewed the transcription and marked it finished.
-
-Approved pages should not be automatically processed again unless manually unlocked.
+The next roadmap is not “Upgrade 11.” It is a product simplification and reliability roadmap built on top of that foundation.
 
 ---
 
-## 1.2 Preserve transcription history
+# 2. Product Goal
 
-Each image should maintain three versions:
+The default experience should be understandable to someone with a large folder of note photos who does not care about the internal routing engine.
 
-### Raw AI transcription
-Exact text returned by the AI.
+The core promise is:
 
-### Repaired transcription
-Result after safe LaTeX cleanup.
+> **Turn these photos into text, tell me what looks questionable, and let me deal with the questionable pages now or later.**
 
-### Final transcription
-Human-edited version.
+The application should support one underlying processing engine with three levels of assurance, not three separate products.
 
-Every retry should create a new revision rather than deleting the previous version.
+## Default workflow
 
-Required controls:
+`Import → Process → Batch Summary → Review / Spot-check / External AI / Export`
 
-- Restore previous
-- View raw
-- View repaired
-- View final
-- Compare versions
+The user should not need to understand queue states, routing signatures, cache fingerprints, or retry machinery unless something goes wrong.
 
 ---
 
-## 1.3 Detect incomplete API responses
+# 3. Non-Negotiable Reliability Rules
 
-Detect when an AI response may have stopped because of an output-token limit.
+These rules remain authoritative for every new feature.
 
-If truncation is detected:
-
-- classify the page as Review
-- display `Possible truncated response`
-- preserve the partial transcription
-- allow retry with Primary or Secondary AI
-
-If provider metadata includes a stop reason, use it.
-
-Examples:
-
-- `max_tokens`
-- `length`
-- incomplete response state
+1. **Never silently replace uncertainty with confidence.**
+2. **Never destroy a useful earlier result.**
+3. **Never recompute more than necessary.**
+4. **A successful provider response is evidence and must be persisted before local post-processing can fail.**
+5. **Good means no warning signals were detected; it does not mean independently verified or correct.**
+6. **External AI may propose text but never controls approval or page state.**
+7. **No AI disagreement workflow automatically chooses a winner.**
+8. **Approved pages must become Needs Reapproval after any accepted text change.**
+9. **API keys must never be persisted in projects, archives, review packages, logs, or URLs.**
+10. **Changes touching transcription, math repair/validation, providers, routing, persistence, or export must pass browser smoke tests.**
 
 ---
 
-# PART 2 — Primary and Secondary AI System
+# 4. Unified Processing UX
 
-## 2.1 Independent AI configurations
+## Phase 1 — One Process Workflow
 
-The system should maintain two completely independent configurations.
+Replace the conceptual split between “Photo to Text & Go,” “Fast Batch,” and “Guided Review” with one processing workflow.
 
-### Primary AI
+### Primary action
 
-Fields:
+**Process Batch**
 
-- Provider
-- Model
-- API key
-- Base URL if required
-- Prompt
-- image-detail option if supported
+### Default behavior: Quick Transcribe
 
-Typical use:
+Quick Transcribe should:
 
-Fast and inexpensive first pass.
+- process each queued page with Primary AI once
+- preserve the raw provider response immediately
+- run safe repair and deterministic validation
+- classify into piles
+- stop after the first semantic transcription pass
+- continue transient retries for network/rate-limit failures because those are transport recovery, not a second interpretation
+- never automatically invoke Secondary AI
+- never automatically approve a page
 
-### Secondary AI
+This is the default “photo to text and go” workflow.
 
-Same fields as Primary.
+### Optional toggle: Auto-fix flagged pages
 
-Typical use:
+Rename/reframe the current automatic routing feature as:
 
-More capable model for difficult pages.
-
----
-
-## 2.2 Per-pile AI routing
-
-Each pile should independently select:
-
-- Primary
-- Secondary
-
-Required selectors:
-
-- Review
-- Unclear
-- Math Unsure
-- Failed
-- Current pile
-
-Selections should persist locally.
-
----
-
-## 2.3 Optional automatic routing
-
-Add an optional setting:
-
-`Automatically process problem piles with selected AI`
+**Auto-fix flagged pages**
 
 When enabled:
 
-Primary AI processes the original image.
+- Review / Unclear / Math Unsure / eligible Failed pages use their configured Primary/Secondary route
+- all existing attempt caps and loop protection remain
+- temporary network failures do not count as a new semantic interpretation
+- local post-processing failures never trigger another paid AI call
+- Approved / Needs Reapproval / Needs Refresh remain protected
 
-Then:
+This is what the earlier plan called Fast Batch.
 
-`Good → stop`
+### Optional setting: High Assurance Math
 
-`Review → selected Review AI`
+Add an explicit higher-cost setting:
 
-`Unclear → selected Unclear AI`
+**High Assurance Math**
 
-`Math Unsure → selected Math Unsure AI`
+It should be opt-in.
 
-`Failed → selected Failed AI`
+Possible policy:
 
-Automatic routing must have:
+- identify math-heavy pages using deterministic observable signals
+- request an independent second reading only where useful
+- compare candidate outputs conservatively
+- disagreement moves the page to Review
+- never auto-select the preferred answer
+- clearly show additional calls/cost before the run
 
-- maximum retry count
-- no infinite retry loops
-- visible retry history
-- ability to disable automation
+Do not run dual-model verification on every page by default.
 
-Recommended default:
+### Guided Review
 
-Maximum 2 AI attempts per image.
+Guided Review is not a processing mode.
 
----
-
-# PART 3 — Confidence and Quality Scoring
-
-## 3.1 Internal quality score
-
-Generate a quality score using observable warning signals rather than asking the model to invent a confidence percentage.
-
-Possible factors:
-
-- number of `[unclear]` markers
-- number of `MATH_UNSURE` markers
-- malformed LaTeX
-- response length
-- truncation status
-- unusual replacement characters
-- repeated punctuation
-- incomplete delimiter pairs
-- excessive repair operations
-- mismatch between first and second AI passes
-
-Example score:
-
-`Quality: 87/100`
-
-This score is a review aid, not a claim that the transcription is 87% objectively correct.
+It is a post-processing action available from the batch summary, filters, and piles.
 
 ---
 
-## 3.2 Automatic thresholds
+# 5. Batch Completion Dashboard
 
-Suggested defaults:
+## Phase 2 — Make the End of a Batch Actionable
 
-### 90–100
-Good
+When a queue completes, show a clear summary instead of only “queue complete.”
 
-### 70–89
-Review
+Example:
 
-### Below 70
-Review or Unclear depending on detected problems
+```
+Batch complete — 300 pages
 
-Explicit `[unclear]` overrides the score and goes to Unclear.
+Good                         251
+Review                        18
+Math Unsure                   14
+Unclear                        5
+Interrupted                    8
+Failed                         4
 
-Explicit `MATH_UNSURE` overrides the score and goes to Math Unsure.
+Good = no warning signals detected.
+It does not mean independently verified.
+```
+
+Required actions:
+
+- **Spot-check Good pages**
+- **Review flagged pages**
+- **Review with External AI**
+- **Resume Interrupted**
+- **Retry Failed**
+- **Export everything**
+
+### Interrupted behavior
+
+Resume Interrupted should:
+
+- reuse the durable queue
+- preserve queue order
+- require credentials only when needed
+- avoid treating temporary transport problems as transcription-quality failures
+
+### Failed behavior
+
+Retry Failed should:
+
+- distinguish retryable work from configuration/authentication failures
+- not encourage repeated requests with the same known-bad credentials/configuration
+- preserve previous raw/final results where any exist
 
 ---
 
-# PART 4 — Mathematics Handling
+# 6. Good-Page Spot Checks and Reliability History
 
-## 4.1 Math transcription protocol
+## Phase 3 — Make “Good” Honest
 
-AI should preserve math using LaTeX.
+A Good page means only:
 
-Preferred forms:
+> no automatic warning signals were detected.
 
-Inline:
+It is not a correctness claim.
 
-`$x^2+3x$`
+After each batch, offer:
 
-Display:
+**Spot-check 5 Good pages**
 
-`$$\int_0^1 x^2\,dx$$`
+Default sample size: 5.
 
-or:
+The user may choose another size.
 
-`\[...\]`
+### Sampling rules
 
-The prompt should explicitly request preservation of:
+- random selection from the current batch/document scope
+- do not repeatedly sample the same page unless the user requests it
+- make the sample selection reproducible where practical by storing the sampled page IDs
+
+### Spot-check result
+
+For each sampled page, the human records:
+
+- OK
+- Error found
+- optional note
+- optional error category
+
+Suggested error categories:
+
+- wrong digit
+- dropped sign/operator
+- exponent/subscript error
+- symbol/Greek-letter error
+- missing text
+- extra text
+- formatting/LaTeX only
+- other
+
+### Reliability ledger
+
+Persist every spot-check result with:
+
+- page ID
+- batch/run ID
+- timestamp
+- image hash
+- provider
+- model
+- Primary/Secondary pass
+- prompt fingerprint
+- processing fingerprint
+- whether Auto-fix was enabled
+- whether High Assurance Math was enabled
+- human outcome
+- optional error type/note
+
+### Reporting
+
+Show earned counts such as:
+
+> Across 40 spot-checked Good pages from this model/prompt, 37 were marked OK and 3 had errors.
+
+Do not automatically present that as a formal “92.5% accuracy” score.
+
+The sample is operational evidence, not necessarily a statistically representative benchmark.
+
+### Why this matters
+
+This creates real evidence for:
+
+- whether Good is trustworthy enough for a given model/prompt
+- whether Auto-fix adds value
+- whether High Assurance Math is worth its additional cost
+- which error types recur most often
+
+---
+
+# 7. External AI Round Trip
+
+## Phase 4 — Export and Import Ship Together
+
+Do not ship “Export problem pages to AI” without the return/import path.
+
+The feature should be presented as:
+
+**Review with External AI**
+
+The application remains the source of truth.
+
+External AI provides proposed corrections only.
+
+## 7.1 Export problem pages
+
+Allow export of:
+
+- Review
+- Math Unsure
+- Unclear
+- selected Failed pages where an image/transcription exists
+- optionally user-selected pages
+
+Do not include Interrupted pages whose only problem is transport failure unless the user explicitly asks.
+
+### Chunking
+
+Chat-friendly default:
+
+- 10 pages per package
+
+User-selectable:
+
+- 5
+- 10
+- 20
+
+Each package should include:
+
+- stable page ID
+- original image
+- current final transcription
+- raw transcription where useful
+- deterministic warnings
+- Math Unsure markers
+- pile/reason
+- page/document metadata
+- a ready-made review prompt
+- exact return schema
+
+ZIP remains appropriate for archive/reproducibility, but the external-AI workflow should optimize for practical chat upload limits.
+
+## 7.2 External review prompt
+
+The generated prompt should explicitly instruct the outside AI:
+
+- preserve the supplied page ID exactly
+- return proposed corrected text
+- explain uncertainty briefly if needed
+- do not invent missing page IDs
+- do not approve pages
+- do not assign application pile/state
+- do not silently remove uncertainty
+- do not rewrite unrelated content merely for style
+
+### Return format
+
+Preferred minimal format:
+
+```json
+{
+  "page_id": "abc123",
+  "corrected_text": "proposed corrected transcription",
+  "note": "Changed exponent 8 to 3 after checking source image."
+}
+```
+
+For multiple pages, accept either:
+
+- JSON array
+- `{ "pages": [...] }`
+
+Do not request a classification field.
+
+---
+
+# 8. External Correction Import
+
+## Phase 4B — Safe Return Path
+
+Imported external text is untrusted proposed text.
+
+It never becomes Approved automatically.
+
+It never directly controls the application's state.
+
+### Tolerant parsing
+
+Accept common chat-model output variations:
+
+- Markdown JSON code fences
+- prose before or after JSON
+- JSON array
+- `{ "pages": [...] }`
+- unknown extra fields
+
+Handle safely:
+
+- unknown page IDs → ignore and report
+- duplicate page IDs → flag for review
+- malformed entries → report
+- missing expected pages → report
+- empty corrected text → reject/report
+
+### Import report
+
+Example:
+
+```
+External corrections loaded
+
+Matched pages          13
+Unknown page IDs        2
+Malformed entries       1
+Expected but missing    4
+```
+
+### Mandatory diff review
+
+Importing a file must not immediately change final text.
+
+For every matched proposal show:
+
+`Current final ↔ Proposed external text`
+
+with a visible diff.
+
+Required actions:
+
+- **Accept proposal**
+- **Reject**
+- **Edit proposal**
+
+### Accept behavior
+
+When accepted:
+
+- push the old final text into revision history
+- write the new final text
+- preserve external proposal text separately in provenance
+- record source as `External AI import`
+- record import/package ID and timestamp
+- run safe repair/validation/classification again
+- Approved → Needs Reapproval
+- never auto-Approve
+
+### Reject behavior
+
+Record that the proposal was reviewed and rejected.
+
+Do not delete the proposal/provenance.
+
+### External correction state
+
+Do not add a permanent twelfth pile unless usage proves it is necessary.
+
+Use the existing Review workflow with a clear reason such as:
+
+`External correction proposed — human review required`
+
+---
+
+# 9. High Assurance Math
+
+## Phase 5 — Optional Independent Verification
+
+This combines the strongest remaining idea from the old roadmap with the new simplified UX.
+
+High Assurance Math should be explicitly optional because it costs more.
+
+### Candidate triggers
+
+Use deterministic signals such as:
+
+- high density of math spans
+- equations with structural warnings
+- MATH_UNSURE markers
+- pages containing many superscripts/subscripts
+- matrices/integrals/summations
+- prior spot-check history showing recurring math errors for the current model/prompt
+
+### Verification behavior
+
+Possible strategies:
+
+1. second full-page reading
+2. targeted equation/region re-read
+3. independent Math Verifier role over source crop + candidate text
+
+The verifier must not receive hidden reasoning from the first model.
+
+The verifier should see:
+
+- source image/crop
+- candidate transcription
+- explicit task to identify disagreements/errors
+
+It should return evidence, not approval.
+
+### Result
+
+- agreement is supporting evidence, not proof of correctness
+- disagreement → Review
+- no automatic winner
+
+### Success metric
+
+Use the spot-check ledger to compare:
+
+- Quick Transcribe
+- Auto-fix flagged pages
+- High Assurance Math
+
+by real human-observed error counts and extra AI cost.
+
+---
+
+# 10. Remaining Reliability / Infrastructure Work
+
+## Phase 6 — Hardening Backlog
+
+These are the best unfinished items from the original roadmap.
+
+### 6.1 Durable targeted-region queue
+
+Current limitation:
+
+- completed targeted results persist
+- an in-flight targeted-region request does not survive reload as a durable job
+
+Goal:
+
+- make targeted-region work use the same durable queue semantics as whole-page processing
+- pause/resume/cancel
+- persisted job state
+- request identity
+- transient retry history
+- no duplicate launches
+
+### 6.2 Project schema migrations
+
+Current schema:
+
+`math-photo-notes-project-v1`
+
+Before introducing incompatible project fields:
+
+- add explicit migration functions
+- preserve older project data
+- back up unsupported/corrupt state before recovery
+- add migration fixtures to CI
+
+### 6.3 Regression corpus expansion
+
+Keep the current Playwright smoke suite as a release gate.
+
+Expand with checked-in fixtures for:
 
 - fractions
 - radicals
-- exponents
-- subscripts
+- superscripts/subscripts
 - Greek letters
-- derivatives
-- partial derivatives
+- dropped minus/operator cases
 - integrals
-- summations
-- limits
 - matrices
-- vectors
-- piecewise functions
-- equation alignment
-- integral bounds
+- crossed-out handwriting
+- rotated pages
+- shadows/poor contrast
+- blank pages
+- long pages
+- malformed LaTeX
+- explicit Math Unsure
+- truncation
+- provider failure/recovery
+- external correction import parsing/diff behavior
+- spot-check persistence
+
+The permanent regression:
+
+`√x`
+
+must never become:
+
+`\sqrt{}x`
+
+### 6.4 Self-host MathJax
+
+Current state:
+
+- CDN URL is pinned to MathJax 3.2.2
+
+Production hardening goal:
+
+- bundle/self-host the required MathJax assets
+- remove third-party runtime script execution from the page where API keys are entered
+
+### 6.5 Large archive improvements
+
+Current archive:
+
+- browser-generated
+- store-only/uncompressed ZIP
+- assembled in memory
+
+For very large projects:
+
+- stream archive generation where possible
+- optionally compress entries
+- show archive progress
+- avoid browser-memory spikes
 
 ---
 
-## 4.2 Math uncertainty protocol
+# 11. Useful Image-Preparation Work from the Old Plan
 
-Never silently guess uncertain mathematics.
+## Phase 7 — Optional Image Quality Tools
 
-Required marker:
+Only build these if spot-check/error history shows image quality is a meaningful source of errors.
 
-`[MATH_UNSURE: seen="..." guess="..." note="..."]`
-
-Human-readable guess:
-
-`(I think it says: ...)`
-
----
-
-## 4.3 Safe LaTeX repair
-
-Only perform repairs that do not require guessing mathematical meaning.
-
-Safe examples:
-
-- Unicode `−` → `-`
-- `×` → `\times`
-- `π` → `\pi`
-- `∞` → `\infty`
-- `≤` → `\le`
-- `≥` → `\ge`
-- doubled MathJax delimiters
-- obvious missing command backslashes inside known math regions
-
-Unsafe example:
-
-Do not automatically transform `√x` into an expression whose radical scope is uncertain.
-
-Instead:
-
-- preserve it
-- mark it for Math Unsure if necessary
-
----
-
-## 4.4 EquationWright validation layer
-
-Reuse EquationWright-style checks where applicable.
-
-Check for:
-
-- unmatched `{ }`
-- unmatched `\(` and `\)`
-- unmatched `\[` and `\]`
-- unmatched `$$`
-- incomplete `\frac`
-- malformed `\sqrt`
-- incomplete superscripts
-- incomplete subscripts
-- broken matrix environments
-- mismatched `\begin{}` / `\end{}`
-- suspicious missing backslashes
-- malformed integral limits
-
-Repairs and warnings must be separate.
-
-### Repair
-Safe automatic transformation.
-
-### Warning
-Potential mathematical problem requiring human or AI review.
-
----
-
-# PART 5 — Math Preview and Editing
-
-## 5.1 Live MathJax preview
-
-Each transcription card should provide:
-
-### Source
-Editable text / LaTeX.
-
-### Preview
-Rendered MathJax result.
-
-The preview should update after editing.
-
-## 5.2 Highlight errors
-
-If MathJax cannot render an expression:
-
-- show the problematic source
-- highlight the approximate location
-- classify as Math Unsure
-- do not delete the original source
-
----
-
-# PART 6 — Better Human Review
-
-## 6.1 Side-by-side review mode
-
-Desktop layout:
-
-`Original image | transcription`
-
-Controls:
-
-- zoom image
-- rotate
-- fit width
-- fit page
-- previous page
-- next page
-
-## 6.2 Review shortcuts
-
-Keyboard shortcuts could include:
-
-- `A` → Approve
-- `R` → Review
-- `U` → Unclear
-- `M` → Math Unsure
-- `1` → rerun with Primary
-- `2` → rerun with Secondary
-- arrow keys → next/previous page
-
-## 6.3 Approved state
-
-Add `Mark Approved`.
-
-Approved means:
-
-- human checked
-- excluded from automatic retries
-- ready for final export
-
-Allow `Unapprove`.
-
----
-
-# PART 7 — Image Preparation
-
-## 7.1 Rotation
-
-Controls:
-
-- rotate 90° left
-- rotate 90° right
-- rotate 180°
-
-Optional:
-
-automatic orientation detection.
-
-## 7.2 Image enhancement
-
-Non-destructive options:
+Potential non-destructive tools:
 
 - grayscale
 - contrast
@@ -448,834 +602,187 @@ Non-destructive options:
 - sharpen
 - crop
 - straighten
+- automatic orientation suggestion
 
-Always retain the original file.
+Always retain the original image.
 
-## 7.3 Duplicate detection
+Any processed image variant used for AI must receive its own processing fingerprint/provenance.
 
-Before processing, identify likely duplicate images.
+### Duplicate detection follow-up
 
-Possible techniques:
+Current cryptographic hashes catch exact duplicates.
 
-- file hash
-- dimensions
-- perceptual image hash
+Optional improvement:
 
----
+- perceptual duplicate detection for resized/recompressed/near-identical photos
 
-# PART 8 — Page and Document Organization
-
-## 8.1 Drag-and-drop ordering
-
-Users should be able to reorder pages before and after processing.
-
-## 8.2 Document groups
-
-Allow images to be grouped into notebooks/documents.
-
-## 8.3 Metadata
-
-Optional metadata:
-
-- title
-- class
-- chapter
-- lecture
-- date
-- page number
-- tags
-
-## 8.4 Page-number recognition
-
-Attempt to detect printed or handwritten page numbers.
-
-Do not automatically reorder unless the user enables it.
+Never auto-delete a suspected duplicate without user confirmation.
 
 ---
 
-# PART 9 — Second-Pass Intelligence
+# 12. Explicitly Retired / Changed Ideas from the Old Plan
 
-## 9.1 Whole-page retry
+## Numeric quality/confidence score
 
-Current behavior remains available.
+Do not prioritize a synthetic `87/100` transcription confidence score.
 
-Send the entire original image to either AI.
+Observable warning signals, pile reasons, model disagreement, and human spot-check history are more defensible.
 
-## 9.2 Equation-only retry
+If a future score is introduced, it must be described as a review heuristic, not an accuracy probability.
 
-Later upgrade.
+## Automatic page-number reordering
 
-For a Math Unsure marker:
+Keep current behavior:
 
-- identify approximate equation region
-- crop that region
-- send only the crop to Secondary AI
-- ask only about the uncertain mathematical portion
+- suggestions only
+- explicit human acceptance
+- never silently reorder
 
-## 9.3 AI comparison mode
+## External AI classifications
 
-Optional high-accuracy mode.
+Do not accept external AI classifications as authoritative application state.
 
-Process the same page with:
-
-- Primary
-- Secondary
-
-Compare results.
-
-If substantially different:
-
-`Model disagreement`
-
-Move to Review.
-
-Do not automatically decide which answer is correct.
+The app owns classification and approval.
 
 ---
 
-# PART 10 — Batch Management
+# 13. Delivery Order
 
-## 10.1 Progress reporting
+Build in this order.
 
-Display:
+## Release A — Simplified Batch UX
 
-- total pages
-- queued
-- running
-- good
-- review
-- unclear
-- math unsure
-- failed
-- approved
+1. Quick Transcribe default
+2. rename/reframe auto-routing as Auto-fix flagged pages
+3. High Assurance Math placeholder/toggle disabled until Phase 5
+4. batch completion dashboard
+5. Resume Interrupted
+6. Retry Failed
+7. Guided Review links from dashboard
 
-## 10.2 Concurrency control
+### Acceptance criteria
 
-Setting:
-
-`Simultaneous requests`
-
-Suggested default: 2.
-
-## 10.3 Rate-limit handling
-
-Detect:
-
-- HTTP 429
-- temporary provider failures
-- timeout
-
-Automatically:
-
-- pause
-- retry with exponential backoff
-- preserve queue position
-
-Never classify a temporary rate limit as a bad transcription.
-
-## 10.4 Retry limits
-
-Track:
-
-- Primary attempts
-- Secondary attempts
-- failures
-- last error
+- one obvious primary Process action
+- Quick Transcribe never makes a semantic second-pass call
+- transient retries still work
+- browser smoke suite covers Quick Transcribe math happy path
+- dashboard counts match actual piles
 
 ---
 
-# PART 11 — Cost Tracking
+## Release B — Good Spot Checks
 
-## 11.1 Usage summary
+1. random Good-page sampling
+2. spot-check review UI
+3. OK/Error result capture
+4. error categories/notes
+5. persistent reliability ledger
+6. model/prompt/processing provenance
+7. reliability summary counts
 
-Where provider metadata permits, record:
+### Acceptance criteria
 
-- input tokens
-- output tokens
-- image usage
-- model
-- provider
-
-## 11.2 Estimated cost
-
-Allow the user to enter/update model rates.
-
-Do not hard-code pricing permanently because provider prices change.
+- spot-check results survive reload/project Save/Open
+- historical counts are tied to model + prompt fingerprint
+- no claim of formal accuracy percentage
 
 ---
 
-# PART 12 — Persistence and Recovery
+## Release C — External AI Round Trip
 
-## 12.1 Save project
+Ship export and import together.
 
-Add `Save Project`.
+1. problem-page selection
+2. chat-friendly chunking
+3. generated external-review prompt
+4. stable page-ID return schema
+5. tolerant import parser
+6. import report
+7. mandatory diff UI
+8. Accept / Reject / Edit proposal
+9. revision + provenance recording
+10. deterministic revalidation after acceptance
+11. Needs Reapproval protection
 
-Export a project manifest containing:
+### Acceptance criteria
 
-- file names
-- image ordering
-- classifications
-- transcription versions
-- repair history
-- retry history
-- AI model information
-- document groups
-- metadata
-- settings
-
-API keys must never be included.
-
-## 12.2 Restore project
-
-Add `Open Project`.
-
-## 12.3 Autosave
-
-Autosave project state locally after:
-
-- transcription
-- manual edit
-- classification change
-- page reorder
-- approval
+- importing data never changes final text before human acceptance
+- unknown/missing/malformed pages are reported
+- external AI cannot set Approved or any pile directly
+- accepted corrections preserve earlier final text
+- round-trip is covered by browser tests
 
 ---
 
-# PART 13 — Export System
+## Release D — High Assurance Math
 
-## 13.1 Markdown
+1. math-heavy deterministic trigger signals
+2. configurable verification policy
+3. second-model/Math-Verifier integration
+4. disagreement review
+5. cost preview
+6. reliability-ledger comparison
 
-Options:
+### Acceptance criteria
 
-- one combined file
-- one file per page
-- one file per document
-
-## 13.2 LaTeX
-
-Export `.tex`.
-
-## 13.3 PDF
-
-Render with MathJax.
-
-Export options:
-
-- Approved only
-- Good + Approved
-- specific pile
-- selected document
-- all pages
-
-## 13.4 Plain text
-
-For systems that do not support Markdown or LaTeX.
-
-## 13.5 Archive export
-
-Later option:
-
-Create a ZIP containing:
-
-- original images
-- raw AI text
-- repaired text
-- final text
-- PDF
-- Markdown
-- project manifest
-- error report
+- off by default
+- no automatic winner
+- extra AI usage is visible
+- spot-check data can compare outcomes with/without the feature
 
 ---
 
-# PART 14 — Suggested Development Phases
-
-## Phase A — Reliability Foundation
-
-1. Approved state
-2. raw/repaired/final versions
-3. revision history
-4. truncation detection
-5. retry attempt counters
-6. safer LaTeX validator
-7. autosave state
-
-Phase A establishes the rule that useful earlier results are never destroyed.
-
-## Phase A2 — Reliability Hardening
-
-This phase moves reliability infrastructure ahead of automatic routing and large-batch features.
-
-### A2.1 Versioned project schema
-
-Use an explicit project format such as:
-
-`math-photo-notes-project-v1`
-
-Persist:
-
-- stable page IDs
-- image hash
-- file metadata
-- ordering
-- current processing state
-- raw/repaired/final transcription
-- revision history
-- repair history
-- validation warnings
-- retry/attempt history
-- provider/model provenance
-- approval state
-- cache metadata
-
-API keys must never be stored in the project.
-
-Future schema changes must migrate old project data rather than silently discarding it.
-
-### A2.2 IndexedDB project storage
-
-Use IndexedDB for durable project/page/image storage.
-
-Use `localStorage` only for small preferences and a lightweight compatibility/recovery path.
-
-Large image batches must not depend on `localStorage` quota.
-
-### A2.3 Corrupt-state recovery
-
-Project loading must:
-
-- validate the project envelope/version
-- back up malformed data before resetting
-- explain recovery failures clearly
-- avoid replacing corrupt data with an empty project without preserving the original
-- migrate known older schema versions when possible
-
-### A2.4 Provider capability registry
-
-Track capabilities per provider/configuration, including:
-
-- vision/image input
-- known truncation/finish metadata
-- usage metadata availability
-- compatible image formats
-- request cancellation support
-- base URL requirements
-- browser/CORS caveats
-
-Do not assume every OpenAI-compatible endpoint implements the same behavior.
-
-### A2.5 Diagnostics / Doctor
-
-Add a diagnostics report that checks:
-
-- IndexedDB availability
-- storage quota when the browser exposes it
-- autosave health
-- image-format support
-- selected provider configuration
-- model name presence
-- API-key presence without storing or displaying the key
-- compatible base URL configuration
-- request timeout/cancellation support
-- cached result count
-- interrupted/running jobs needing recovery
-
-Diagnostics should recommend a next action rather than just dumping errors.
-
-### A2.6 Request identity, cancellation, and stale-result protection
-
-Every AI attempt gets a unique attempt ID.
-
-Requirements:
-
-- `AbortController` where supported
-- explicit request timeout
-- Cancel Current / Cancel Batch
-- a late response from an older attempt must never overwrite a newer attempt
-- duplicate clicks must not create duplicate in-flight work
-- interrupted requests return to a resumable state rather than silently becoming bad transcriptions
-
-### A2.7 Durable job state
-
-Track page jobs independently from the UI loop.
-
-Suggested states:
-
-- Queued
-- Running
-- Interrupted
-- Done
-- Failed
-- Approved
-
-On reload, a previously Running item should become Interrupted/Queued for safe resume.
-
-### A2.8 Image and processing fingerprints
-
-Compute a cryptographic image hash where Web Crypto is available.
-
-Build a processing fingerprint from:
-
-- image hash
-- provider
-- model
-- prompt version/content
-- relevant image/detail options
-
-Use fingerprints for:
-
-- exact duplicate detection
-- preventing accidental duplicate calls
-- identifying whether a cached transcription is reusable
-- provenance in revision history
-
-### A2.9 Content-addressed cache
-
-Cache successful AI results by processing fingerprint.
-
-A cache entry should preserve:
-
-- raw transcription
-- provider/model
-- stop reason
-- timestamp
-- repair/validation results
-
-A retry explicitly requested as a fresh AI pass must be able to bypass the cache.
-
-### A2.10 Regression fixtures and self-tests
-
-Create deterministic tests for:
-
-- safe LaTeX repair
-- classification
-- truncation parsing
-- project-schema migration/validation
-- stale-attempt rejection
-- processing fingerprints
-
-Maintain a manual/fixture corpus containing:
-
-- fractions
-- radicals
-- integrals
-- matrices
-- superscripts/subscripts
-- crossed-out handwriting
-- blank pages
-- rotated pages
-- shadows
-- long pages
-- Unicode math
-- malformed LaTeX
-- explicit `MATH_UNSURE` markers
-
-The known semantic bug `√x → \\sqrt{}x` must remain a permanent regression test.
-
-## Phase B — AI Routing
-
-**Status:** Implemented through Upgrade 8 on 2026-09-30.
-
-1. Primary/Secondary configuration
-2. per-pile AI choice
-3. opt-in automatic problem routing
-4. bounded total processing attempts
-5. per-page routing history
-6. provider error handling
-7. rate-limit/backoff handling
-8. cache bypass/fresh-pass controls
-9. repeated-route signature protection
-10. durable mixed Primary/Secondary queue jobs
-11. credential-aware pause/resume for pending automatic routes
-12. Approved / Needs Reapproval protection
-
-Automatic routing is off by default and never performs human approval.
-
-## Phase C — Math Review
-
-1. MathJax live preview
-2. EquationWright validation
-3. structured Math Unsure markers
-4. highlight malformed math
-5. math-specific warning categories
-6. deterministic checks before optional AI verification
-
-## Phase D — Human Review Interface
-
-1. side-by-side review
-2. image zoom
-3. rotation
-4. keyboard shortcuts
-5. approve/unapprove workflow
-6. previous/next navigation
-7. anchored review flags tied to text ranges and optionally image regions
-8. edits after approval automatically produce Needs Reapproval
-
-## Phase E — Batch Scale
-
-1. concurrency control
-2. durable queue manager
-3. pause/resume
-4. duplicate detection using image hashes
-5. page ordering
-6. retry/backoff system
-7. resumable interrupted jobs
-8. request deduplication/idempotency
-
-## Phase F — Document Organization
-
-**Status:** Implemented in Upgrade 7 on 2026-09-30.
-
-1. notebook/document groups
-2. page metadata
-3. page number suggestions
-4. drag-and-drop ordering
-5. document-scoped Markdown/PDF export groundwork
-
-Implemented behavior:
-
-- groups persist in the project envelope
-- pages may remain Unfiled
-- page order is stable and persisted
-- Guided Review respects the active document filter
-- page metadata includes title, class, chapter, lecture, date, page number, and tags
-- suggestions are deterministic and must be accepted explicitly
-- suggestions never reorder pages automatically
-
-## Phase G — Advanced AI Review
-
-**Status:** Implemented in Upgrade 9 on 2026-09-30.
-
-1. equation/region-only second pass
-2. model disagreement detection
-3. optional Primary/Secondary region comparison
-4. targeted crop reprocessing
-5. region-level provenance
-6. dependency tracking
-7. Needs Refresh state for downstream text affected by targeted re-analysis
-
-Implemented behavior:
-
-- crop selection is visual and uses the original unrotated source image
-- a region may be linked to selected final-transcription text
-- targeted results never overwrite page text automatically
-- reviewer explicitly chooses a preferred result
-- differing latest Primary/Secondary region results are flagged as Model disagreement
-- the application never selects a winner automatically
-- preferred results that differ from linked final text produce Needs Refresh
-- Apply preferred replaces only the linked span and preserves page revision history
-- Keep current records a human decision without rewriting final text
-- detached anchors remain visibly unresolved
-- whole-page retry remains available
-- targeted result provenance includes provider/model/pass, crop hash, page-text hash, stop/truncation metadata, validation, and event history
-
-Do not recompute an entire page when only one region needs another pass unless the user requests it.
-
-## Phase H — Export and Archival
-
-**Status:** Implemented in Upgrade 10 on 2026-09-30.
-
-1. Markdown export
-2. `.tex` export
-3. MathJax PDF
-4. versioned project export/import
-5. ZIP archive
-6. usage/cost report
-7. portable per-page/per-equation review packages
-8. provenance/audit manifest
-
-Implemented behavior:
-
-- explicit Save Project / Open Project using the v1 project envelope
-- exported settings exclude API keys
-- archive ZIP is generated locally with a dependency-free store-only ZIP writer
-- archive contains project JSON, audit/usage manifests, combined exports, originals, page lineage, and targeted-region evidence
-- per-page and per-region portable review ZIPs
-- plain-text and LaTeX combined exports
-- whole-page and region usage normalization
-- user-entered Primary/Secondary input/output token rates
-- live estimated cost summary
-- standalone usage and audit JSON exports
-
-Cost estimation is advisory only and must not be presented as billing truth.
-
-## Phase I — Optional High-Accuracy Workflows
-
-1. independent Math Verifier role over source crop + candidate transcription
-2. verifier must not receive hidden reasoning from the first model
-3. human remains the final approval authority
-4. Fast Batch and Guided Review share the same underlying processing engine
-
-Avoid autonomous multi-agent orchestration where deterministic application logic is sufficient.
+## Release E — Infrastructure Hardening
+
+1. durable targeted-region queue
+2. project migration framework
+3. expanded regression fixture corpus
+4. self-host MathJax
+5. streaming/compressed large archives
+6. optional image-quality tools based on observed error data
 
 ---
 
-# Current Implementation Snapshot
+# 14. Product Success Criteria
 
-As of 2026-09-30, Upgrades 1–10 are implemented or substantially implemented in `photo_to_text.html`.
+The next roadmap is successful when:
 
-Current architecture includes:
-
-- raw / repaired / final transcription lineage
-- Approved and Needs Reapproval states
-- IndexedDB persistence with lightweight localStorage fallback
-- v1 project schema
-- provider capability diagnostics
-- attempt IDs, cancellation, stale-response protection, and timeout handling
-- SHA-256 image/process fingerprints
-- exact-result cache
-- live MathJax preview and structured deterministic math validation
-- Guided Review with zoom/fit/rotation and keyboard shortcuts
-- persistent anchored review flags
-- durable ordered queue
-- configurable 1–6 request concurrency
-- pause/resume/cancel
-- transient 429/5xx/network/timeout retries with Retry-After and exponential backoff
-- persistent document/notebook groups and Unfiled pages
-- stable page ordering with drag-and-drop
-- per-page metadata
-- explicit-only page-number suggestions
-- document-scoped Guided Review
-- document-specific Markdown/PDF export groundwork
-- opt-in automatic Review / Unclear / Math Unsure / eligible Failed routing
-- durable queue jobs with per-job Primary/Secondary pass
-- 2–4 total processing-attempt limits
-- repeated classification→AI route loop protection
-- visible routing history
-- fresh-call vs exact-cache automatic retry policy
-- automatic queue pause when routed credentials are unavailable
-- visual equation/region crop selection
-- targeted Primary and Secondary crop retries
-- targeted transient retry/backoff and cancellation
-- model-disagreement detection without automatic winner selection
-- region-level provenance/event history
-- text-span dependency anchors and re-anchoring
-- Needs Refresh state and pile
-- explicit Apply preferred / Keep current dependency resolution
-- approval-lineage preservation after targeted changes
-- explicit project JSON Save/Open
-- dependency-free portable project ZIP archive
-- per-page and per-region review-package ZIPs
-- combined Markdown / plain text / LaTeX exports
-- normalized usage report and user-configurable rate estimates
-- provenance/audit manifest
-- export regression tests guarding API-key leakage
-
-A stale duplicated HTML tail discovered during Upgrade 7 was removed so the repository again contains one canonical HTML document.
-
-The numbered Upgrade 1–10 roadmap is complete. Remaining work is tracked as hardening and optional high-accuracy follow-up.
-
-## Post-roadmap critical hardening hotfix — 2026-09-30
-
-A real browser execution test found that the dynamic missing-backslash repair regex in `repairMathSpan` was over-escaped. The regex constructor threw on ordinary delimited math, which could turn a successful paid transcription into a misleading Failed result.
-
-Implemented hotfix:
-
-- correct dynamic RegExp escaping
-- correct single-backslash LaTeX command insertion
-- raw provider text persisted before repair/validation/classification
-- exact-result cache populated before post-processing
-- usage/provenance recorded before post-processing
-- local post-processing failures become Review with raw output preserved
-- automatic AI rerouting blocked for local post-processing failures
-- Gemini API key moved from query string to `x-goog-api-key` header
-- MathJax CDN reference pinned to `3.2.2`
-- new Playwright/Chromium browser smoke suite
-- GitHub Actions browser regression gate on main and pull requests
-- explicit math fixtures for exponent, radical, fraction, sqrt, theta/subscript, and function syntax
-- mocked end-to-end math provider response through the normal Process Batch path
-- forced post-processing-crash fixture verifying raw-result preservation
-
-Release rule going forward:
-
-**No transcription/math-path change is complete until the browser smoke suite executes successfully. A parse-only syntax check is not sufficient.**
+- a first-time user can process hundreds of images without learning the internal routing engine
+- Quick Transcribe performs one semantic AI pass and stops cleanly
+- flagged pages have obvious next actions
+- Good pages are described honestly and can be spot-checked
+- normal use accumulates real human-reviewed reliability evidence
+- outside AI review can make a complete round trip back into the project
+- every imported correction is diffed and human accepted/rejected
+- Approved remains a human decision
+- High Assurance Math can be evaluated using real error/cost evidence
+- a local processing bug can never destroy a successful provider result
+- browser CI exercises the normal math path before release
 
 ---
 
-# PART 15 — Recommended Build Order
+# 15. Long-Term Workflow
 
-### Upgrade 1 — Phase A
-Approved state + revision history + raw/repaired/final text + truncation detection + retry counters + safer validator + baseline autosave.
+`Import → Process → preserve raw → repair/validate → classify → Batch Summary`
 
-**Status:** Implemented on 2026-09-30.
+Then the user chooses:
 
-### Upgrade 2 — Phase A2
-Versioned project schema + IndexedDB + recovery/migrations + provider capability registry + Doctor diagnostics.
+`Spot-check Good`
 
-**Status:** Core implementation completed on 2026-09-30.
+or
 
-Implemented: v1 project envelope, IndexedDB project/image storage, localStorage fallback, recovery handling, provider capability registry, Doctor diagnostics, image/process hashing groundwork, and cache storage.
+`Review flagged`
 
-Still expected in later hardening: explicit future schema migrations and a larger checked-in regression fixture corpus.
+or
 
-### Upgrade 3 — Phase A2 continuation
-Request IDs + timeout/cancellation + stale-response guards + durable job states + image/process fingerprints + exact-result cache + regression self-tests.
+`Review with External AI → Import proposals → Diff → Accept/Reject`
 
-**Status:** Core implementation completed on 2026-09-30.
+or
 
-Implemented: attempt IDs, AbortController, stale-result protection, Interrupted state, request timeout, fingerprints, exact-result cache, and initial Doctor self-tests.
+`High Assurance Math`
 
-### Upgrade 4
-Live MathJax preview + stronger EquationWright validation.
+then:
 
-**Status:** Implemented on 2026-09-30.
+`Approved → Export / Archive`
 
-Implemented capabilities include source/preview editing, on-demand MathJax rendering, structured math-warning categories, approximate source snippets, and structured Math Unsure display.
-
-**Security follow-up:** live preview currently loads MathJax on demand in the main application page. The CDN reference is now pinned to MathJax 3.2.2 rather than a floating major tag. Before production hardening, still consider bundling/self-hosting MathJax so a third-party remote script is not executed on a page where API keys may be entered.
-
-### Upgrade 5
-Side-by-side guided review + anchored flags + Needs Reapproval behavior.
-
-**Status:** Implemented on 2026-09-30.
-
-Implemented capabilities include guided one-page review, previous/next navigation, image zoom/fit/rotation, keyboard review shortcuts, persistent text-anchored review flags with re-anchoring after edits, and automatic Approved → Needs Reapproval transitions when final transcription text changes.
-
-### Upgrade 6
-Durable queue manager + concurrency + pause/resume + retry/backoff.
-
-**Status:** Implemented on 2026-09-30.
-
-Implemented capabilities include a persisted ordered queue, 1–6 configurable simultaneous requests with a default of 2, pause/resume without cancelling in-flight work, safe queue recovery after reload, cancellation that preserves resumable interrupted pages, transient HTTP/network/timeout detection, Retry-After support, capped exponential backoff, separate transient retry history, and automatic continuation of the remaining queue after temporary failures. Persistent temporary failures move to Interrupted rather than being treated as a bad transcription.
-
-### Upgrade 7
-Document organization + page ordering.
-
-**Status:** Implemented on 2026-09-30.
-
-Implemented capabilities:
-
-- persistent notebook/document groups plus Unfiled
-- stable page ordering before and after processing
-- drag-and-drop reorder controls
-- page metadata: title, class, chapter, lecture, date, page number, tags
-- deterministic non-destructive page-number suggestions
-- per-page accept/dismiss suggestion controls
-- explicit bulk application of suggestions within the current document
-- group-aware Guided Review navigation
-- ordering/group data in autosave/project state
-- document-specific Markdown and PDF export groundwork
-
-Page-number suggestions never reorder pages automatically.
-
-### Upgrade 8
-Automatic Primary/Secondary routing using the hardened processing engine.
-
-**Status:** Implemented on 2026-09-30.
-
-Implemented capabilities:
-
-- automatic routing is opt-in and off by default
-- Review / Unclear / Math Unsure use their existing independent Primary/Secondary selector
-- selected non-transient Failed cases may route through the Failed selector
-- each automatic route is appended as a durable queue job rather than recursively invoking AI
-- queue jobs carry their own Primary/Secondary pass
-- maximum total processing attempts per page is configurable from 2–4
-- repeated `classification → AI slot` signatures are blocked
-- automatic routes retain visible queued/completed/stopped/cancelled history
-- Approved and Needs Reapproval are protected
-- automatic routing never approves a page
-- automatic retry can require a fresh AI call or allow an exact cached result
-- missing credentials/configuration for a pending routed job pause the queue rather than causing transcription failure
-- turning automation off cancels pending automatic route jobs but does not abort an already-running request
-- restored durable queues retain mixed Primary/Secondary route jobs
-
-### Upgrade 9
-Equation/region-only retries + model disagreement checking + dependency/Needs Refresh tracking.
-
-**Status:** Implemented on 2026-09-30.
-
-Implemented capabilities:
-
-- visual targeted crop picker on the unrotated original image
-- crop coordinates and crop hash persisted per region
-- optional dependency link to selected final-transcription text
-- Primary targeted retry
-- Secondary targeted retry
-- concurrent Primary + Secondary targeted comparison
-- targeted requests reuse timeout, cancellation, transient retry, Retry-After, and exponential backoff logic
-- latest Primary/Secondary targeted results are compared conservatively
-- differing results create Model disagreement and never auto-select a winner
-- each result stores provider/model/pass, raw/repaired text, repair/validation information, stop/truncation data, usage metadata, crop hash, and source page-text hash
-- per-region provenance/event history
-- explicit preferred-result selection
-- preferred result never changes page text automatically
-- linked mismatch creates Needs Refresh
-- explicit Apply preferred updates only the linked final-text span and preserves revision history
-- explicit Keep current resolves the dependency without rewriting the page
-- text edits and whole-page retries re-anchor/recompute region dependencies
-- detached dependencies remain unresolved
-- Approved-page lineage is preserved so changed text requires reapproval
-- automatic whole-page routing does not consume Needs Refresh pages
-
-Current limitation: targeted in-flight requests are cancellable but are not themselves durable queue jobs across reload; completed region results and provenance are persisted.
-
-### Upgrade 10
-Full archive/export system + portable review packages + usage/cost reporting.
-
-**Status:** Implemented on 2026-09-30.
-
-Implemented capabilities:
-
-- explicit versioned Save Project / Open Project
-- current `math-photo-notes-project-v1` envelope exported with retained image data
-- safe provider/model/routing/project settings without API keys
-- active processing must be stopped before project replacement
-- restored durable whole-page queues reopen paused
-- dependency-free in-browser ZIP archive generation
-- archive includes project JSON, original images, raw/repaired/final text, revisions, flags, routing history, targeted crops/results/provenance, audit manifest, usage report, and combined exports
-- per-page Review package ZIP
-- per-region Review package ZIP
-- combined plain-text and LaTeX export in addition to Markdown/PDF
-- provider usage-field normalization
-- separate user-configurable Primary/Secondary input/output rates
-- live estimated usage/cost summary
-- standalone usage-report JSON
-- standalone audit-manifest JSON
-- regression checks that safe settings and audit exports omit API-key fields
-
-Known limitations:
-
-- ZIP entries are stored without compression and archives are assembled in browser memory
-- usage/cost estimates depend on provider metadata and user-entered rates
-- future project schema versions still need explicit migration functions
-- in-flight targeted-region requests are cancellable but not durable across reload
-
-## Roadmap status
-
-Upgrades 1–10 are complete.
-
-Recommended follow-up backlog:
-
-1. durable queue jobs for targeted-region requests
-2. future-schema migration framework
-3. expand the checked-in browser regression corpus beyond the current core math/provider happy-path fixtures
-4. self-host/bundle MathJax
-5. optional independent Math Verifier workflow
-6. streaming/compressed archive support for very large projects
-
----
-
-# Design Principles
-
-**Never silently replace uncertainty with confidence.**
-
-**Never destroy a useful earlier result.**
-
-**Never recompute more than necessary.**
-
-When the system knows what it can safely repair, it should repair it.
-
-When it has a plausible interpretation but is uncertain, it should show:
-
-`(I think it says: ...)`
-
-When it cannot determine the content reliably, it should send that page to the appropriate review pile.
-
-Deterministic software should own mechanical checks, state transitions, storage, caching, and routing. AI calls should be used only where language/vision judgment is actually needed.
-
-The final workflow becomes:
-
-`Import → fingerprint → Primary AI/cache → classify → safe repair/validate → targeted secondary AI where appropriate → human review → Approved → export`
-
-with the original image, processing provenance, original AI response, repair history, earlier revisions, and approval lineage always recoverable.
+The system should remain conservative, provenance-first, and human-controlled.
