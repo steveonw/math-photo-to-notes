@@ -544,6 +544,7 @@ els.provider.addEventListener('change',()=>syncProvider(1,true));
 els.provider2.addEventListener('change',()=>syncProvider(2,true));
 [els.model,els.baseurl,els.model2,els.baseurl2,els.prompt].forEach(x=>x.addEventListener('change',saveSettings));
 ['current-ai','review-ai','unclear-ai','mathunsure-ai','failed-ai','concurrency','auto-routing','auto-max-attempts','auto-cache-policy'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',()=>{saveSettings();renderQueueStatus()})});
+$('auto-routing')?.addEventListener('change',()=>{if(!autoRoutingEnabled())cancelPendingAutoRoutes()});
 
 async function addFiles(list){
  const files=[...list].filter(f=>f.type.startsWith('image/'));
@@ -908,7 +909,8 @@ function renderQueueStatus(){
  const done=jobs.filter(j=>j.state==='done').length;
  const running=jobs.filter(j=>j.state==='running').length;
  const pending=jobs.filter(j=>j.state==='pending').length;
- status.textContent=(state.queuePaused?'Paused':'Queue')+': '+done+'/'+jobs.length+' done · '+running+' running · '+pending+' pending';
+ const autoJobs=jobs.filter(j=>j.autoRoute).length;
+ status.textContent=(state.queuePaused?'Paused':'Queue')+': '+done+'/'+jobs.length+' done · '+running+' running · '+pending+' pending'+(autoJobs?' · '+autoJobs+' auto':'')+(state.queuePlan.pauseReason?' · '+state.queuePlan.pauseReason:'');
 }
 function render(){
  renderStats();
@@ -1129,7 +1131,7 @@ window.manualClass=(id,c)=>{
  pushRevision(i,c==='approved'?'Before approval':'Before manual classification');
  i.classification=c;i.status=c==='failed'?'error':'done';
  i.reason=c==='approved'?'Human reviewed and approved this page.':'Manually assigned to '+c+'.';
- if(c==='approved'){i.error='';i.approvalAt=new Date().toISOString();i.needsReapproval=false}
+ if(c==='approved'){i.error='';i.approvalAt=new Date().toISOString();i.needsReapproval=false;i.autoRoutingNote='Human approved; automatic routing is blocked.'}
  else if(c!=='needsreapproval')i.needsReapproval=false;
  i.editingSnapshotTaken=false;scheduleAutosave();render()
 };
@@ -1258,7 +1260,20 @@ function snapPrimary(){return{provider:els.provider.value,model:els.model.value.
 function snapSecondary(){return{provider:els.provider2.value,model:els.model2.value.trim(),apiKey:els.apikey2.value.trim(),baseUrl:els.baseurl2.value.trim(),prompt:els.prompt.value,pass:'secondary'}}
 function snapForChoice(choice){return choice==='secondary'?snapSecondary():snapPrimary()}
 function snapForQueuePlan(plan){return plan?.pass==='secondary'?snapSecondary():snapPrimary()}
-function validateSnap(s){if(!s.apiKey){alert('Enter the '+(s.pass||'selected')+' AI API key first.');return false}if(!s.model){alert('Enter a model name.');return false}if(s.provider==='compatible'&&!s.baseUrl){alert('Enter a compatible base URL.');return false}return true}
+function snapValidationMessage(s){
+ if(!s?.apiKey)return 'Enter the '+(s?.pass||'selected')+' AI API key first.';
+ if(!s.model)return 'Enter a model name for '+(s.pass||'the selected AI')+'.';
+ if(s.provider==='compatible'&&!s.baseUrl)return 'Enter a compatible base URL for '+(s.pass||'the selected AI')+'.';
+ return '';
+}
+function validateSnap(s){const msg=snapValidationMessage(s);if(msg){alert(msg);return false}return true}
+function refreshQueueRuntimeSnaps(){
+ state.queueRuntimeSnaps={primary:snapPrimary(),secondary:snapSecondary()};
+}
+function snapForQueueJob(job,plan){
+ const pass=job?.pass||plan?.pass||'primary';
+ return state.queueRuntimeSnaps?.[pass]||snapForChoice(pass);
+}
 
 async function runOne(i,s,{forceFresh=false}={}){
  if(i.classification==='approved')return {outcome:'skipped'};
@@ -1314,9 +1329,9 @@ async function runOne(i,s,{forceFresh=false}={}){
    i.repairs=repaired.repairs;i.validationWarnings=validationWarnings;i.validationDetails=validationDetails;i.mathRenderWarnings=[];i.truncated=!!result.truncated;i.stopReason=result.stopReason||'';
    i.usage=result.usage||null;i.status='done';i.classification=cl.classification;i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
    i.reason=(cached?'Reused exact cached result. ':'')+(repaired.repairs.length?'Auto-repaired '+repaired.repairs.length+' common LaTeX artifact'+(repaired.repairs.length===1?'':'s')+'. ':'')+cl.reason;
-   i.error='';i.lastError='';i.retryNotBefore='';refreshPageNumberSuggestion(i);
+   i.error='';i.lastError='';i.lastFailureStatus=0;i.retryNotBefore='';refreshPageNumberSuggestion(i);
    if(!cached&&fingerprint)await cachePut(fingerprint,{schema:PROJECT_SCHEMA,createdAt:new Date().toISOString(),rawText,result:{truncated:!!result.truncated,stopReason:result.stopReason||''},truncated:!!result.truncated,stopReason:result.stopReason||'',usage:result.usage||null,provider:s.provider,model:s.model});
-   return {outcome:'done'};
+   return {outcome:'done',classification:i.classification,cached};
  }catch(e){
    if(i.activeAttemptId!==attemptId)return {outcome:'stale'};
    if(masterController.signal.aborted||e?.name==='AbortError'){
@@ -1329,7 +1344,7 @@ async function runOne(i,s,{forceFresh=false}={}){
      i.retryNotBefore='';
      return {outcome:'interrupted'};
    }
-   i.failures=(i.failures||0)+1;i.status='error';i.classification='failed';i.error=e instanceof Error?e.message:String(e);i.lastError=i.error;
+   i.failures=(i.failures||0)+1;i.status='error';i.classification='failed';i.error=e instanceof Error?e.message:String(e);i.lastError=i.error;i.lastFailureStatus=Number(e?.status||0);
    i.reason='The API/browser request failed, so no usable transcription was produced.';
    i.retryNotBefore='';
    return {outcome:'failed'};
@@ -1367,19 +1382,94 @@ function startQueue(list,s){
  for(const item of list){
    if(!item||seen.has(item.id)||item.classification==='approved'||item.status==='running')continue;
    seen.add(item.id);
-   jobs.push({id:item.id,state:'pending',forceFresh:!(item.status==='queued'||item.status==='interrupted'),createdAt:new Date().toISOString()});
+   jobs.push({id:item.id,state:'pending',pass:s.pass||'primary',forceFresh:!(item.status==='queued'||item.status==='interrupted'),autoRoute:false,createdAt:new Date().toISOString()});
  }
  if(!jobs.length){alert('There are no eligible items to process.');return}
  state.queuePlan={id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random(),pass:s.pass||'primary',provider:s.provider,model:s.model,createdAt:new Date().toISOString(),jobs};
- state.queueRuntimeSnap=s;state.queuePaused=false;state.cancelRequested=false;state.running=true;
+ refreshQueueRuntimeSnaps();state.queueRuntimeSnap=s;state.queueRuntimeSnaps[s.pass||'primary']=s;state.queuePaused=false;state.cancelRequested=false;state.running=true;
  queueButtonsDisabled(true);scheduleAutosave();render();pumpQueue();
 }
 function finishQueueIfDone(){
  const plan=state.queuePlan;if(!plan)return false;
  const jobs=plan.jobs||[];
  if(jobs.some(j=>j.state==='pending'||j.state==='running'))return false;
- state.queuePlan=null;state.queueRuntimeSnap=null;state.queuePaused=false;state.running=false;state.cancelRequested=false;
+ state.queuePlan=null;state.queueRuntimeSnap=null;state.queueRuntimeSnaps={};state.queuePaused=false;state.running=false;state.cancelRequested=false;
  queueButtonsDisabled(false);scheduleAutosave();render();return true;
+}
+function routeSelectorId(classification){
+ return ({review:'review-ai',unclear:'unclear-ai',mathunsure:'mathunsure-ai',failed:'failed-ai'})[classification]||'';
+}
+function routePassForClassification(classification){
+ const id=routeSelectorId(classification);return id?($(id)?.value||'secondary'):'';
+}
+function routeSignature(classification,pass){return String(classification||'')+'>'+String(pass||'')}
+function hasAutoRouteSignature(i,signature){
+ return !!i?.routingHistory?.some(h=>h.action==='queued'&&h.signature===signature);
+}
+function eligibleAutomaticFailure(i,nextPass,previousPass){
+ const msg=String(i?.lastError||i?.error||'');
+ if(/original image is unavailable|re-add the image/i.test(msg))return false;
+ const configLike=[401,403].includes(Number(i?.lastFailureStatus||0))||/api key|unauthor|forbidden|invalid.{0,12}key|base url|model name/i.test(msg);
+ if(configLike&&nextPass===previousPass)return false;
+ return true;
+}
+function autoRouteGuardReason(i,classification,nextPass,previousPass,maxAttempts){
+ if(!i)return 'Item no longer exists.';
+ if(i.classification==='approved'||i.needsReapproval||i.classification==='needsreapproval')return 'Human approval state is protected from automatic routing.';
+ if(!['review','unclear','mathunsure','failed'].includes(classification))return 'Classification does not require automatic routing.';
+ if(totalProcessingAttempts(i)>=maxAttempts)return 'Maximum '+maxAttempts+' processing attempts reached.';
+ if(classification==='failed'&&!eligibleAutomaticFailure(i,nextPass,previousPass))return 'Failure appears to require human configuration or the original image.';
+ const sig=routeSignature(classification,nextPass);
+ if(hasAutoRouteSignature(i,sig))return 'Stopped to prevent a repeated '+classification+' → '+nextPass+' routing loop.';
+ return '';
+}
+function recordRoutingEvent(i,event){
+ if(!i)return;
+ i.routingHistory=i.routingHistory||[];
+ i.routingHistory.push({at:new Date().toISOString(),...event});
+ if(i.routingHistory.length>40)i.routingHistory.shift();
+}
+function maybeAppendAutomaticRoute(plan,item,job,result){
+ if(!plan||!item||!autoRoutingEnabled())return false;
+ const classification=item.classification;
+ if(!['review','unclear','mathunsure','failed'].includes(classification))return false;
+ const pass=routePassForClassification(classification);
+ if(!pass)return false;
+ const maxAttempts=autoMaxAttempts();
+ const stop=autoRouteGuardReason(item,classification,pass,job?.pass||plan.pass||'primary',maxAttempts);
+ const routeSnap=state.queueRuntimeSnaps?.[pass]||snapForChoice(pass);
+ if(stop){
+   item.autoRoutingNote=stop;
+   recordRoutingEvent(item,{action:'stopped',from:classification,pass,provider:routeSnap?.provider||'',model:routeSnap?.model||'',reason:stop,signature:routeSignature(classification,pass)});
+   return false;
+ }
+ const forceFresh=autoCachePolicy()==='fresh';
+ const signature=routeSignature(classification,pass);
+ const reason='Automatic '+classification+' routing selected '+pass+' AI after attempt '+totalProcessingAttempts(item)+' of '+maxAttempts+'.';
+ plan.jobs.push({
+   id:item.id,state:'pending',pass,forceFresh,autoRoute:true,
+   fromClassification:classification,routeReason:reason,signature,
+   createdAt:new Date().toISOString()
+ });
+ item.autoRoutingNote='Queued '+pass+' AI automatically for '+classification+'.';
+ recordRoutingEvent(item,{action:'queued',from:classification,pass,provider:routeSnap?.provider||'',model:routeSnap?.model||'',reason,signature,forceFresh});
+ return true;
+}
+function cancelPendingAutoRoutes(){
+ const plan=state.queuePlan;if(!plan)return 0;
+ let count=0;
+ for(const job of plan.jobs||[]){
+   if(job.autoRoute&&job.state==='pending'){
+     job.state='done';job.outcome='auto-disabled';job.finishedAt=new Date().toISOString();count++;
+     const item=state.items.find(x=>x.id===job.id);
+     if(item){
+       item.autoRoutingNote='Pending automatic route cancelled because automatic routing was disabled.';
+       recordRoutingEvent(item,{action:'cancelled',from:job.fromClassification||item.classification,pass:job.pass||'',reason:'Automatic routing disabled before this route started.',signature:job.signature||''});
+     }
+   }
+ }
+ if(count){scheduleAutosave();if(!finishQueueIfDone())pumpQueue();else render()}
+ return count;
 }
 function pumpQueue(){
  const plan=state.queuePlan;
@@ -1395,11 +1485,24 @@ function pumpQueue(){
    if(!job)break;
    const item=state.items.find(x=>x.id===job.id);
    if(!item){job.state='done';job.finishedAt=new Date().toISOString();continue}
-   job.state='running';job.startedAt=new Date().toISOString();active++;
+   if(item.classification==='approved'||item.needsReapproval||item.classification==='needsreapproval'){
+     job.state='done';job.finishedAt=new Date().toISOString();job.outcome='protected';continue
+   }
+   const jobSnap=snapForQueueJob(job,plan);
+   const configError=snapValidationMessage(jobSnap);
+   if(configError){
+     state.queuePaused=true;plan.pauseReason=configError;item.autoRoutingNote=job.autoRoute?'Automatic route paused: '+configError:item.autoRoutingNote;
+     scheduleAutosave();render();break
+   }
+   job.state='running';job.startedAt=new Date().toISOString();job.provider=jobSnap.provider;job.model=jobSnap.model;active++;
    scheduleAutosave();renderQueueStatus();
-   runOne(item,state.queueRuntimeSnap,{forceFresh:!!job.forceFresh}).then(result=>{
+   runOne(item,jobSnap,{forceFresh:!!job.forceFresh}).then(result=>{
      if(state.queuePlan!==plan)return;
      job.state='done';job.finishedAt=new Date().toISOString();job.outcome=result?.outcome||'done';
+     if(job.autoRoute){
+       recordRoutingEvent(item,{action:'completed',from:job.fromClassification||'',pass:job.pass||'',provider:job.provider||'',model:job.model||'',reason:'Automatic route completed with '+(item.classification||result?.classification||'unknown')+'.',signature:job.signature||''});
+     }
+     maybeAppendAutomaticRoute(plan,item,job,result);
      scheduleAutosave();
      if(!finishQueueIfDone())pumpQueue();
    }).catch(e=>{
@@ -1417,14 +1520,19 @@ function pauseQueue(){
 }
 function resumeQueue(){
  if(!state.queuePlan)return;
- const s=snapForQueuePlan(state.queuePlan);
- if(!validateSnap(s))return;
- state.queueRuntimeSnap=s;state.queuePaused=false;state.running=true;queueButtonsDisabled(true);scheduleAutosave();render();pumpQueue();
+ refreshQueueRuntimeSnaps();
+ const pendingPasses=[...new Set((state.queuePlan.jobs||[]).filter(j=>j.state==='pending').map(j=>j.pass||state.queuePlan.pass||'primary'))];
+ for(const pass of pendingPasses){
+   const s=state.queueRuntimeSnaps[pass]||snapForChoice(pass);
+   const msg=snapValidationMessage(s);if(msg){alert(msg);return}
+ }
+ state.queueRuntimeSnap=state.queueRuntimeSnaps[state.queuePlan.pass||'primary']||snapForQueuePlan(state.queuePlan);
+ state.queuePlan.pauseReason='';state.queuePaused=false;state.running=true;queueButtonsDisabled(true);scheduleAutosave();render();pumpQueue();
 }
 function cancelQueue(){
  state.cancelRequested=true;state.queuePaused=false;
  for(const ctrl of state.activeControllers.values())ctrl.abort(new DOMException('Batch cancelled','AbortError'));
- state.queuePlan=null;state.queueRuntimeSnap=null;
+ state.queuePlan=null;state.queueRuntimeSnap=null;state.queueRuntimeSnaps={};
  state.running=state.activeControllers.size>0;
  queueButtonsDisabled(state.running);
  scheduleAutosave();render();
@@ -1459,6 +1567,11 @@ async function runA2SelfTests(){
  test('filename page-number suggestion is non-destructive',suggestPageNumber({name:'notes-page-012.jpg',metadata:{pageNumber:''},finalText:''})?.value==='12');
  const orderProbe=[{id:'a',order:2},{id:'b',order:1}];
  test('page-number suggestion does not mutate metadata',!('pageNumber' in (orderProbe[0].metadata||{})));
+ const routeProbe={classification:'review',needsReapproval:false,primaryAttempts:1,secondaryAttempts:0,routingHistory:[]};
+ test('auto route allows first bounded review route',autoRouteGuardReason(routeProbe,'review','secondary','primary',2)==='');
+ routeProbe.routingHistory.push({action:'queued',signature:'review>secondary'});
+ test('auto route stops repeated route signature',/prevent/.test(autoRouteGuardReason(routeProbe,'review','secondary','primary',3)));
+ test('auto route protects Approved state',/protected/.test(autoRouteGuardReason({classification:'approved',primaryAttempts:1,secondaryAttempts:0,routingHistory:[]},'review','secondary','primary',3)));
  return {passed:tests.filter(x=>x.ok).length,total:tests.length,tests};
 }
 
@@ -1480,6 +1593,7 @@ async function runDoctor(){
    ['Request timeout',Math.round(REQUEST_TIMEOUT_MS/1000)+' seconds'],
    ['Concurrency',String(queueConcurrency())],
    ['Transient retry limit',String(MAX_TRANSIENT_RETRIES)],
+   ['Automatic routing',autoRoutingEnabled()?'Enabled, max '+autoMaxAttempts()+', '+autoCachePolicy():'Disabled'],
    ['Durable queue',state.queuePlan?(state.queuePaused?'Paused / resumable':'Active'):'Idle'],
    ['Cached results',String(cacheCount)],
    ['Interrupted jobs',String(interrupted)],
