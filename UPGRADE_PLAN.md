@@ -980,6 +980,10 @@ Implemented capabilities include guided one-page review, previous/next navigatio
 ### Upgrade 6
 Durable queue manager + concurrency + pause/resume + retry/backoff.
 
+**Status:** Implemented on 2026-09-30.
+
+Implemented capabilities include a persisted ordered queue, 1–6 configurable simultaneous requests with a default of 2, pause/resume without cancelling in-flight work, safe queue recovery after reload, cancellation that preserves resumable interrupted pages, transient HTTP/network/timeout detection, Retry-After support, capped exponential backoff, separate transient retry history, and automatic continuation of the remaining queue after temporary failures. Persistent temporary failures move to Interrupted rather than being treated as a bad transcription.
+
 ### Upgrade 7
 Document organization + page ordering.
 
