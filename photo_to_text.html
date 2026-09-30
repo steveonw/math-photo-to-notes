@@ -1249,6 +1249,8 @@ function buildBatchSummary(plan){
    completedAt:new Date().toISOString(),
    pageIds,
    autoFix:!!plan?.autoFixAtStart,
+   highAssurance:!!plan?.highAssuranceAtStart,
+   highAssurancePolicy:plan?.highAssurancePolicy||'',
    counts:batchSummaryCounts(pageIds)
  };
 }
@@ -1307,8 +1309,10 @@ function spotCheckSessionRecords(sessionId){
 function reliabilityGroups(){
  const map=new Map();
  for(const r of state.spotCheckLedger||[]){
-   const key=[r.provider||'unknown',r.model||'unknown',r.promptFingerprint||'no-prompt-hash'].join('|');
-   if(!map.has(key))map.set(key,{key,provider:r.provider||'unknown',model:r.model||'unknown',promptFingerprint:r.promptFingerprint||'',ok:0,error:0,total:0,lastAt:''});
+   const verified=!!(r.highAssuranceVerified??r.highAssurance);
+   const policy=verified?(r.highAssurancePolicy||'legacy'):'off';
+   const key=[r.provider||'unknown',r.model||'unknown',r.promptFingerprint||'no-prompt-hash',verified?'verified':'standard',policy].join('|');
+   if(!map.has(key))map.set(key,{key,provider:r.provider||'unknown',model:r.model||'unknown',promptFingerprint:r.promptFingerprint||'',highAssuranceVerified:verified,highAssurancePolicy:policy,ok:0,error:0,total:0,lastAt:''});
    const g=map.get(key);g.total++;if(r.outcome==='ok')g.ok++;else if(r.outcome==='error')g.error++;
    if((r.at||'')>g.lastAt)g.lastAt=r.at||'';
  }
@@ -1327,7 +1331,12 @@ async function recordSpotCheck(outcome){
    finalTextHash:await sha256Hex(text),
    provider:page.lastProvider||'',model:page.lastModel||'',pass:page.lastPass||'',
    promptFingerprint:page.lastPromptFingerprint||'',processingFingerprint:page.lastFingerprint||'',
-   autoFix:!!page.lastAutoFixEnabled,highAssurance:!!page.lastHighAssurance,
+   autoFix:!!page.lastAutoFixEnabled,
+   highAssuranceRequested:!!page.lastHighAssurance,
+   highAssurance:page.highAssuranceStatus==='verified',
+   highAssuranceVerified:page.highAssuranceStatus==='verified',
+   highAssurancePolicy:page.lastHighAssurancePolicy||'',
+   highAssuranceStatus:page.highAssuranceStatus||'',
    classificationAtCheck:page.classification,outcome,errorCategory:category,note
  };
  state.spotCheckLedger=state.spotCheckLedger||[];state.spotCheckLedger.push(rec);
@@ -1393,7 +1402,7 @@ function renderReliabilitySummary(){
  box.classList.remove('hidden');
  box.innerHTML='<b>Spot-check evidence</b> · '+ledger.length+' human-reviewed Good page'+(ledger.length===1?'':'s')+' · '+ok+' marked OK · '+errors+' error'+(errors===1?'':'s')+' found.'+
    '<div class="small" style="margin-top:4px">Counts are operational evidence, not a formal accuracy percentage.</div>'+
-   '<div class="reliability-groups">'+groups.map(g=>'<div class="reliability-row"><b>'+esc(g.provider)+' · '+esc(g.model)+'</b> · '+g.total+' checked · '+g.ok+' OK · '+g.error+' error'+(g.error===1?'':'s')+'<br><span class="small">Prompt '+esc((g.promptFingerprint||'unavailable').slice(0,12))+(g.promptFingerprint?'…':'')+'</span></div>').join('')+'</div>'+
+   '<div class="reliability-groups">'+groups.map(g=>'<div class="reliability-row"><b>'+esc(g.provider)+' · '+esc(g.model)+' · '+(g.highAssuranceVerified?'High Assurance verified ('+esc(highAssurancePolicyLabel(g.highAssurancePolicy))+')':'Standard / not independently verified')+'</b> · '+g.total+' checked · '+g.ok+' OK · '+g.error+' error'+(g.error===1?'':'s')+'<br><span class="small">Prompt '+esc((g.promptFingerprint||'unavailable').slice(0,12))+(g.promptFingerprint?'…':'')+'</span></div>').join('')+'</div>'+
    '<div class="spotcheck-controls"><button id="download-spotcheck-ledger">Download spot-check evidence .json</button></div>';
  const dl=$('download-spotcheck-ledger');if(dl)dl.onclick=()=>download('photo-to-text-spot-check-evidence.json',JSON.stringify({schema:'math-photo-notes-spot-check-v1',generatedAt:new Date().toISOString(),records:state.spotCheckLedger||[]},null,2),'application/json;charset=utf-8');
 }
@@ -1403,6 +1412,10 @@ function renderBatchSummary(){
  if(!summary||state.running||state.queuePlan){box.classList.add('hidden');box.innerHTML='';return}
  const counts=batchSummaryCounts(summary.pageIds);
  const total=summary.pageIds.length;
+ const assuranceChecks=state.items.flatMap(i=>summary.pageIds.includes(i.id)?(i.highAssuranceChecks||[]).filter(v=>v.batchId===summary.id):[]);
+ const assuranceVerified=assuranceChecks.filter(v=>v.outcome==='verified').length;
+ const assuranceReview=assuranceChecks.filter(v=>v.outcome==='review').length;
+ const assuranceFailed=assuranceChecks.filter(v=>v.outcome==='failed').length;
  const flagged=counts.review+counts.mathunsure+counts.unclear+counts.needsreapproval+counts.needsrefresh;
  const interrupted=counts.interrupted,failed=counts.failed;
  const failedItems=state.items.filter(i=>summary.pageIds.includes(i.id)&&i.classification==='failed');
@@ -1412,14 +1425,17 @@ function renderBatchSummary(){
  const stat=(label,n)=>'<div class="batch-summary-stat"><b>'+n+'</b><span>'+esc(label)+'</span></div>';
  box.classList.remove('hidden');
  box.innerHTML='<h2>'+esc(summary.label||'Batch')+' complete — '+total+' page'+(total===1?'':'s')+'</h2>'+
-   '<div class="small">'+(summary.autoFix?'Auto-fix flagged pages was enabled.':'Quick Transcribe used one semantic pass per page; no automatic second-pass AI routing.')+'</div>'+
+   '<div class="small">'+(summary.autoFix?'Auto-fix flagged pages was enabled.':'Quick Transcribe did not auto-fix flagged pages.')+(summary.highAssurance?' High Assurance used the '+esc(highAssurancePolicyLabel(summary.highAssurancePolicy))+' policy with Secondary as an independent verifier.':' High Assurance was off.')+'</div>'+
    '<div class="batch-summary-grid">'+
      stat('Good',counts.good)+stat('Review',counts.review)+stat('Math Unsure',counts.mathunsure)+stat('Unclear',counts.unclear)+
      stat('Interrupted',counts.interrupted)+stat('Failed',counts.failed)+
+     (summary.highAssurance?stat('Assurance verified',assuranceVerified):'')+
+     (summary.highAssurance&&assuranceReview?stat('Assurance disagreements',assuranceReview):'')+
+     (summary.highAssurance&&assuranceFailed?stat('Assurance failed',assuranceFailed):'')+
      (counts.needsreapproval?stat('Needs Reapproval',counts.needsreapproval):'')+
      (counts.needsrefresh?stat('Needs Refresh',counts.needsrefresh):'')+
    '</div>'+
-   '<div class="batch-summary-note"><b>Good means no automatic warning signals were detected.</b> It does not mean independently verified or guaranteed correct.</div>'+
+   '<div class="batch-summary-note"><b>Good means no automatic warning signals were detected.</b> '+(summary.highAssurance?'Only Good pages counted as “Assurance verified” received an independent Secondary reading; disagreement never replaces the Primary automatically.':'It does not mean independently verified or guaranteed correct.')+'</div>'+
    '<div class="batch-summary-actions">'+
      '<label style="display:flex;align-items:center;gap:6px;margin:0"><span class="small">Spot-check</span><select id="summary-spotcheck-count" style="width:auto"><option value="1">1</option><option value="5" selected>5</option><option value="10">10</option><option value="20">20</option></select><button id="summary-spotcheck-good"'+(counts.good?'':' disabled')+'>Good pages</button></label>'+
      '<button id="summary-review-flagged"'+(flagged?'':' disabled')+'>Review '+flagged+' flagged page'+(flagged===1?'':'s')+'</button>'+
@@ -1513,7 +1529,7 @@ function render(){
  <section class="panel card" data-item-id="${esc(i.id)}" draggable="${state.guidedReview?'false':'true'}">
   <aside class="side">
    <div class="drag-handle">↕ Drag to reorder · Order ${Number(i.order||0)+1}</div>
-   <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div><span class="doc-chip">${esc(documentName(i.documentId))}</span>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}<div class="small">Attempts: Primary ${i.primaryAttempts||0} · Secondary ${i.secondaryAttempts||0} · Failures ${i.failures||0} · Transient retries ${i.transientRetries||0}</div>${i.imageHash?`<div class="small">Image hash: ${esc(i.imageHash.slice(0,12))}…</div>`:''}</div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
+   <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div><span class="doc-chip">${esc(documentName(i.documentId))}</span>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}<div class="small">Attempts: Primary ${i.primaryAttempts||0} · Secondary ${i.secondaryAttempts||0} · Assurance ${i.highAssuranceAttempts||0} · Failures ${i.failures||0} · Transient retries ${i.transientRetries||0}</div>${i.imageHash?`<div class="small">Image hash: ${esc(i.imageHash.slice(0,12))}…</div>`:''}</div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
    ${i.url?`<div class="image-stage"><img id="image-${i.id}" class="preview" src="${i.url}" alt="${esc(i.name)}" style="transform:rotate(${Number(i.imageRotation||0)}deg) scale(${Number(i.imageZoom||1)});${i.imageFit==='width'?'width:100%;max-width:none;':'max-width:100%;max-height:68vh;'}"></div>
    <div class="image-tools">
     <button onclick="zoomImage('${i.id}',-0.15)">Zoom −</button>
@@ -1564,6 +1580,8 @@ function render(){
    </div>
    ${i.reason?`<div class="reason"><b>Sorting reason:</b> ${esc(i.reason)}</div>`:''}
    ${i.autoRoutingNote?`<div class="routing-note"><b>Automatic routing:</b> ${esc(i.autoRoutingNote)}</div>`:''}
+   ${i.highAssuranceNote?`<div class="${i.highAssuranceStatus==='review'?'error':'routing-note'}"><b>High Assurance:</b> ${esc(i.highAssuranceNote)}</div>`:''}
+   ${i.highAssuranceChecks&&i.highAssuranceChecks.length?`<details class="historybox"><summary>High Assurance evidence (${i.highAssuranceChecks.length})</summary><ol>${i.highAssuranceChecks.slice().reverse().map(v=>`<li><b>${esc(v.outcome||'check')} · ${esc(v.provider||'')} ${esc(v.model||'')}</b><br><span class="small">${esc(v.policy||'')} · triggers: ${esc((v.triggerSignals||[]).join(', ')||'none')}${v.comparison?' · similarity '+Math.round(Number(v.comparison.similarity||0)*100)+'% · math '+(v.comparison.mathEqual?'matched':'differed'):''}${v.at?' · '+esc(new Date(v.at).toLocaleString()):''}</span>${v.repairedText?`<pre>${esc(v.repairedText)}</pre>`:''}${v.error?`<div class="error">${esc(v.error)}</div>`:''}</li>`).join('')}</ol></details>`:''}
    ${i.routingHistory&&i.routingHistory.length?`<details class="routing-history"><summary>Routing history (${i.routingHistory.length})</summary><ol>${i.routingHistory.slice().reverse().map(h=>`<li><b>${esc(h.from||'result')} → ${esc(h.pass||'')}</b> · ${esc(h.provider||'')} ${esc(h.model||'')} · ${esc(h.action||'')}<br><span class="small">${esc(h.reason||'')}${h.at?' · '+esc(new Date(h.at).toLocaleString()):''}</span></li>`).join('')}</ol></details>`:''}
    ${i.classification==='needsreapproval'?`<div class="error"><b>Needs Reapproval:</b> this page was previously approved, then its final transcription changed.</div>`:''}
    ${i.classification==='needsrefresh'?`<div class="reason" style="border-color:#7dd3fc;background:#f0f9ff"><b>Needs Refresh:</b> a selected targeted-region result differs from the linked final transcription. The page text has not been changed automatically.</div>`:''}
@@ -2548,6 +2566,16 @@ async function runA2SelfTests(){
  const summaryProbe={id:'batch-test',pageIds:['a','b'],label:'Quick Transcribe',showSummary:true};
  test('batch summary preserves unique run page IDs',buildBatchSummary(summaryProbe).pageIds.length===2);
  test('Quick Transcribe auto-fix is opt-in',autoRoutingEnabled()===!!$('auto-routing')?.checked);
+ const haPlain=highAssuranceMathSignals('The derivative rule is described in ordinary words only.');
+ const haAny=highAssuranceMathSignals('The result is $x^2+1$.');
+ const haHeavy=highAssuranceMathSignals('$$\\int_0^1 \\frac{x^2}{\\sqrt{x+1}}\\,dx = \\sum_{n=1}^{10} n$$');
+ test('High Assurance math trigger ignores plain prose',haPlain.anyMath===false&&haPlain.heavy===false);
+ test('High Assurance any-math policy detects inline symbolic math',haAny.anyMath===true);
+ test('High Assurance heavy policy detects complex calculus notation',haHeavy.heavy===true);
+ const haSame=compareHighAssuranceTexts('Value: $\\frac{1}{2}$','Value: \\( \\frac{1}{2} \\)');
+ const haDiff=compareHighAssuranceTexts('Value: $x-1$','Value: $x+1$');
+ test('High Assurance comparison tolerates math delimiter/space changes',haSame.mathEqual===true&&haSame.disagree===false);
+ test('High Assurance comparison catches sign disagreement',haDiff.mathEqual===false&&haDiff.disagree===true);
  const originalItems=state.items,originalLedger=state.spotCheckLedger;
  state.items=[{id:'g1',classification:'good',status:'done'},{id:'g2',classification:'good',status:'done'},{id:'r1',classification:'review',status:'done'}];
  state.spotCheckLedger=[{pageId:'g1',outcome:'ok'}];
@@ -2591,6 +2619,8 @@ async function runDoctor(){
    ['Concurrency',String(queueConcurrency())],
    ['Transient retry limit',String(MAX_TRANSIENT_RETRIES)],
    ['Automatic routing',autoRoutingEnabled()?'Enabled, max '+autoMaxAttempts()+', '+autoCachePolicy():'Disabled'],
+   ['High Assurance',highAssuranceEnabled()?'Enabled · '+highAssurancePolicyLabel()+' · Secondary verifier'+((p.provider===s.provider&&p.model===s.model)?' (same provider/model, independent call)':''):'Disabled'],
+   ['High Assurance results',(()=>{const checks=state.items.flatMap(i=>i.highAssuranceChecks||[]);return checks.filter(x=>x.outcome==='verified').length+' verified / '+checks.filter(x=>x.outcome==='review').length+' review / '+checks.filter(x=>x.outcome==='failed').length+' failed'})()],
    ['Durable queue',state.queuePlan?(state.queuePaused?'Paused / resumable':'Active'):'Idle'],
    ['Cached results',String(cacheCount)],
    ['Interrupted jobs',String(interrupted)],
@@ -2841,11 +2871,13 @@ function auditManifest(list=state.items){
    pageCount:list.length,documentCount:state.documents.length,
    spotChecks:{total:(state.spotCheckLedger||[]).length,ok:(state.spotCheckLedger||[]).filter(x=>x.outcome==='ok').length,error:(state.spotCheckLedger||[]).filter(x=>x.outcome==='error').length},
    externalReview:{packages:(state.externalReviewExports||[]).length,accepted:list.reduce((n,i)=>n+(i.externalCorrections||[]).filter(x=>x.decision==='accepted').length,0),rejected:list.reduce((n,i)=>n+(i.externalCorrections||[]).filter(x=>x.decision==='rejected').length,0)},
+   highAssurance:{verified:list.filter(i=>i.highAssuranceStatus==='verified').length,review:list.filter(i=>i.highAssuranceStatus==='review').length,checks:list.reduce((n,i)=>n+(i.highAssuranceChecks?.length||0),0)},
    pages:list.map(i=>({
      id:i.id,name:i.name,documentId:i.documentId||'',documentName:documentName(i.documentId),order:i.order,
      classification:i.classification,status:i.status,imageHash:i.imageHash||'',lastFingerprint:i.lastFingerprint||'',
      provider:i.lastProvider||'',model:i.lastModel||'',pass:i.lastPass||'',approvalAt:i.approvalAt||'',
      needsReapproval:!!i.needsReapproval,needsRefresh:!!i.needsRefresh,
+     highAssuranceStatus:i.highAssuranceStatus||'',highAssuranceCheckCount:i.highAssuranceChecks?.length||0,lastHighAssurancePolicy:i.lastHighAssurancePolicy||'',
      revisionCount:i.history?.length||0,reviewFlagCount:i.reviewFlags?.length||0,routingEventCount:i.routingHistory?.length||0,externalCorrectionCount:i.externalCorrections?.length||0,
      regions:(i.regions||[]).map(r=>({id:r.id,note:r.note||'',cropHash:r.cropHash||'',anchor:r.anchor||null,preferredResultId:r.preferredResultId||'',appliedResultId:r.appliedResultId||'',disagreement:!!r.disagreement,needsRefresh:!!r.needsRefresh,resultCount:r.results?.length||0,eventCount:r.events?.length||0}))
    }))
@@ -2880,6 +2912,7 @@ async function archiveEntriesForPages(list,{includeProject=false}={}){
    entries.push({name:base+'review-flags.json',bytes:jsonBytes(i.reviewFlags||[])});
    entries.push({name:base+'routing-history.json',bytes:jsonBytes(i.routingHistory||[])});
    entries.push({name:base+'usage-log.json',bytes:jsonBytes(i.usageLog||[])});
+   entries.push({name:base+'high-assurance-checks.json',bytes:jsonBytes(i.highAssuranceChecks||[])});
    const image=await itemImageData(i);
    if(image){const d=dataUrlBytes(image);entries.push({name:base+'original'+imageExtensionFromDataUrl(image,i.name),bytes:d.bytes})}
    for(let rix=0;rix<(i.regions||[]).length;rix++){
