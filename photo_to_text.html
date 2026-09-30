@@ -1207,13 +1207,20 @@ function diceSimilarity(a,b){
  let hits=0;for(let i=0;i<b.length-1;i++){const g=b.slice(i,i+2),n=m.get(g)||0;if(n){hits++;m.set(g,n-1)}}
  return (2*hits)/((a.length-1)+(b.length-1));
 }
+function assuranceProseSkeleton(text){
+ const t=String(text||''),segs=mathSegments(t);if(!segs.length)return normalizeAssuranceText(t);
+ let out='',pos=0;
+ for(const seg of segs){if(seg.start<pos)continue;out+=t.slice(pos,seg.start)+' [MATH] ';pos=seg.end}
+ out+=t.slice(pos);return normalizeAssuranceText(out);
+}
 function compareHighAssuranceTexts(primaryText,verifierText){
  const a=normalizeAssuranceText(primaryText),b=normalizeAssuranceText(verifierText);
  const pa=assuranceMathPayloads(primaryText),pb=assuranceMathPayloads(verifierText);
  const mathEqual=pa.length===pb.length&&pa.every((x,i)=>x===pb[i]);
- const similarity=diceSimilarity(a,b),exact=a===b;
- const disagree=!mathEqual||similarity<0.94;
- return {exact,mathEqual,similarity,disagree,primaryMath:pa,verifierMath:pb};
+ const proseA=assuranceProseSkeleton(primaryText),proseB=assuranceProseSkeleton(verifierText);
+ const proseEqual=proseA===proseB,similarity=diceSimilarity(a,b),exact=a===b;
+ const disagree=!mathEqual||(!proseEqual&&similarity<0.94);
+ return {exact,mathEqual,proseEqual,similarity,disagree,primaryMath:pa,verifierMath:pb};
 }
 function highAssuranceCostPreview(){
  const queued=state.items.filter(i=>i.status==='queued'||i.status==='interrupted').length;
