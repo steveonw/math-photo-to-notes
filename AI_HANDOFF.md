@@ -1093,6 +1093,10 @@ Diagnostics should remain action-oriented.
 39. Gemini API keys appearing in request URLs.
 40. built-in self-tests existing in source but never being executed by CI.
 41. MathJax returning to a floating CDN major-version URL.
+42. Quick Transcribe silently making a semantic second AI pass when Auto-fix is off.
+43. batch completion counts being computed from the whole project instead of the run that just finished.
+44. Retry Failed blindly repeating a known same-slot authentication/configuration failure.
+45. Guided Review opened from a batch summary including unrelated pages from older runs.
 
 ---
 
@@ -1117,15 +1121,20 @@ The default user story is:
 
 ## Active releases
 
-### Release A — Simplified Batch UX
-- Quick Transcribe default
-- Auto-fix flagged pages
-- actionable batch completion dashboard
-- Resume Interrupted
-- Retry Failed
-- direct links into Guided Review
+### Release A — Simplified Batch UX — implemented 2026-09-30
+- Quick Transcribe is the default batch path
+- Auto-fix flagged pages is the user-facing name for bounded automatic routing
+- High Assurance Math is visible but disabled until Release D
+- power-user routing/retry controls are collapsed under Advanced
+- completed queues produce a persisted run-scoped dashboard
+- dashboard explains the limited meaning of Good
+- dashboard actions: Review flagged pages, Resume Interrupted, Retry Failed, Export everything
+- flagged review is scoped to Review / Unclear / Math Unsure / Needs Reapproval / Needs Refresh pages from that run
+- interrupted recovery preserves prior pass selection where practical
+- failed retry blocks known same-slot auth/configuration repeats
+- browser CI covers one-pass Quick Transcribe behavior
 
-### Release B — Good-page spot checks
+### Release B — Good-page spot checks — next active release
 - random spot-check sample
 - OK / Error found
 - optional error categories
