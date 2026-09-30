@@ -874,7 +874,22 @@ $('retry-failed').onclick=()=>runList(state.items.filter(i=>i.classification==='
 async function runA2SelfTests(){
  const tests=[];
  const test=(name,ok)=>tests.push({name,ok:!!ok});
- const radical=repairLatexForMathJax('$√x
+ const radical=repairLatexForMathJax('$√x$');
+ test('radical scope is never silently rewritten',radical.text==='$√x$');
+ test('MATH_UNSURE routes to Math Unsure',classifyText('[MATH_UNSURE: seen="?" guess="$x$" note="test"] (I think it says: $x$)').classification==='mathunsure');
+ test('explicit unclear routes to Unclear',classifyText('word [unclear] word word word word').classification==='unclear');
+ test('unbalanced math delimiter is detected',latexStructuralWarnings('\\(x+1').length>0);
+ try{validateProjectEnvelope({schema:PROJECT_SCHEMA,version:1,items:[]});test('project schema validates',true)}catch(e){test('project schema validates',false)}
+ try{validateProjectEnvelope({schema:'bad-schema',items:[]});test('unknown project schema is rejected',false)}catch(e){test('unknown project schema is rejected',true)}
+ if(crypto?.subtle){
+   const a=await sha256Hex('same'),b=await sha256Hex('same'),d=await sha256Hex('different');
+   test('fingerprint hashing is deterministic',a===b&&a!==d&&a.length===64);
+ }
+ return {passed:tests.filter(x=>x.ok).length,total:tests.length,tests};
+}
+
+async function runDoctor(){
+ const box=$('doctor-report');box.classList.remove('hidden');box.innerHTML='<b>Doctor:</b> checking…';
  const p=snapPrimary(),s=snapSecondary(),caps1=PROVIDER_CAPABILITIES[p.provider]||{},caps2=PROVIDER_CAPABILITIES[s.provider]||{};
  let quota='Unavailable',cacheCount='Unavailable',idb='OK';
  try{const db=await openProjectDB();db.close()}catch(e){idb='Unavailable: '+e.message}
