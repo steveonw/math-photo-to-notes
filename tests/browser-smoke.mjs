@@ -164,6 +164,7 @@ try{
     const panelText=await page.locator('#spotcheck-panel').innerText();
     assert(/Good-page spot-check/i.test(panelText),'Spot-check review panel did not open');
     await page.click('#spotcheck-ok');
+    await page.waitForFunction(()=>state.spotCheckLedger.length===1,null,{timeout:5000});
 
     const evidence=await page.evaluate(()=>{
       const rec=state.spotCheckLedger[0];
@@ -204,6 +205,7 @@ try{
     await page.selectOption('#spotcheck-error-category','exponent-subscript');
     await page.fill('#spotcheck-note','Exponent should be checked against the source image.');
     await page.click('#spotcheck-error');
+    await page.waitForFunction(()=>state.spotCheckLedger.length===1&&state.items[0].classification==='review',null,{timeout:5000});
 
     const after=await page.evaluate(()=>({
       classification:state.items[0].classification,
