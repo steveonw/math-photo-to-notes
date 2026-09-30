@@ -217,6 +217,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
       <select id="external-chunk-size"><option value="5">5</option><option value="10" selected>10</option><option value="20">20</option></select>
       <button id="external-review-export">Export problem pages</button>
       <button id="external-review-import">Import corrections</button>
+      <button id="external-review-resume" disabled>Review pending</button>
       <input id="external-review-file" type="file" accept=".json,.txt,application/json,text/plain" class="hidden">
     </div>
     <label>Primary $/1M input <input id="rate-primary-input" type="number" min="0" step="0.01" value="0"></label>
@@ -2829,7 +2830,7 @@ function beginExternalImportFromText(raw,sourceName='external-ai-response'){
  let parsed,session;
  try{parsed=parseExternalCorrectionText(raw);session=normalizeExternalCorrectionPayload(parsed,sourceName)}
  catch(e){alert('Could not import external corrections: '+(e instanceof Error?e.message:String(e)));return null}
- state.externalImportSession=session;scheduleAutosave();render();
+ session.hidden=false;state.externalImportSession=session;scheduleAutosave();render();
  setTimeout(()=>window.scrollTo({top:$('external-review-panel')?.offsetTop||0,behavior:'smooth'}),0);
  return session;
 }
@@ -2858,9 +2859,10 @@ function externalImportReportDetails(report){
  return details.join('');
 }
 function renderExternalReviewPanel(){
- const box=$('external-review-panel');if(!box)return;
+ const box=$('external-review-panel'),resume=$('external-review-resume');if(!box)return;
  const session=state.externalImportSession;
- if(!session){box.classList.add('hidden');box.innerHTML='';return}
+ if(resume){const pending=session?.proposals?.filter(x=>x.status==='pending').length||0;resume.disabled=!pending;resume.textContent=pending?'Review pending ('+pending+')':'Review pending'}
+ if(!session||session.hidden){box.classList.add('hidden');box.innerHTML='';return}
  const r=session.report||{matched:0,unknown:[],duplicates:[],malformed:[],missingExpected:[]},proposal=currentExternalProposal();
  box.classList.remove('hidden');
  const report='<div class="external-report"><span>'+r.matched+' matched</span><span>'+(r.unknown?.length||0)+' unknown</span><span>'+(r.duplicates?.length||0)+' duplicate</span><span>'+(r.malformed?.length||0)+' malformed</span><span>'+(r.missingExpected?.length||0)+' expected missing</span></div>'+externalImportReportDetails(r);
@@ -2895,7 +2897,7 @@ function renderExternalReviewPanel(){
  $('external-accept').onclick=()=>acceptExternalProposal();
  $('external-reject').onclick=()=>rejectExternalProposal();
  $('external-edit').onclick=()=>{proposal.editing=true;scheduleAutosave();render();setTimeout(()=>$('external-proposed-text')?.focus(),0)};
- $('external-session-close').onclick=()=>{scheduleAutosave();box.classList.add('hidden')};
+ $('external-session-close').onclick=()=>{session.hidden=true;scheduleAutosave();render()};
 }
 async function acceptExternalProposal(){
  const session=state.externalImportSession,proposal=currentExternalProposal();if(!session||!proposal)return;
@@ -2964,6 +2966,7 @@ window.exportRegionReviewPackage=async(pageId,regionId)=>{
 $('archive-project').onclick=()=>exportProjectArchive();
 $('external-review-export').onclick=()=>exportExternalReviewPackages(null);
 $('external-review-import').onclick=()=>$('external-review-file').click();
+$('external-review-resume').onclick=()=>{if(state.externalImportSession){state.externalImportSession.hidden=false;render();setTimeout(()=>window.scrollTo({top:$('external-review-panel')?.offsetTop||0,behavior:'smooth'}),0)}};
 $('external-review-file').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)importExternalCorrectionsFile(file)};
 
 async function exportProjectJson(){
