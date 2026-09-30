@@ -20,7 +20,7 @@ The repository owner has explicitly permitted reuse of code and patterns from th
 
 # Current Status
 
-As of 2026-09-30, the project has completed the roadmap through **Upgrade 9**.
+As of 2026-09-30, the project has completed the numbered roadmap through **Upgrade 10**.
 
 Implemented:
 
@@ -42,19 +42,23 @@ Implemented:
 - Primary/Secondary crop comparison
 - region-level provenance and dependency tracking
 - Needs Refresh workflow for stale downstream page text
-
-The next active milestone is:
-
-## Upgrade 10 — Export / Archive / Review Packages
-
-Planned next:
-
-- versioned project export/import
-- ZIP/archive packaging
-- portable per-page/per-region review packages
-- LaTeX/plain-text export expansion
-- usage/cost reporting
+- explicit versioned project Save/Open
+- portable project ZIP archive
+- page and region review-package ZIPs
+- Markdown/plain-text/LaTeX export expansion
+- usage normalization and user-rate cost estimates
 - provenance/audit manifest
+
+The numbered Upgrade 1–10 roadmap is complete.
+
+Recommended remaining work is now a hardening / optional backlog rather than an undefined Upgrade 11:
+
+- durable queue support for in-flight targeted-region requests
+- explicit future project-schema migrations
+- larger checked-in regression fixture corpus
+- self-host/bundle MathJax instead of remote main-page script loading
+- optional independent Math Verifier workflow
+- very-large-project archive streaming/compression improvements
 
 ---
 
@@ -847,6 +851,149 @@ Page ordering is represented by stable persisted item order. Queue processing fo
 
 ---
 
+# Project Save / Open / Archive
+
+Upgrade 10 added explicit portable project and archive workflows.
+
+## Save Project
+
+**Save Project .json** exports the current versioned project envelope:
+
+`math-photo-notes-project-v1`
+
+The saved project includes:
+
+- pages and stable IDs
+- original image data when retained
+- page order and document groups
+- metadata
+- raw/repaired/final transcription
+- revision history
+- review flags
+- routing history
+- targeted regions/results/provenance
+- approval / Needs Reapproval / Needs Refresh state
+- durable whole-page queue state
+- safe non-secret provider/model/routing settings
+- user-entered cost rates
+
+API keys are never included.
+
+## Open Project
+
+**Open Project** validates the project envelope before replacing the current project.
+
+Opening a project:
+
+- requires active processing to be stopped first
+- restores images, text lineage, organization, targeted regions, and durable queue state
+- restores the saved queue as paused/resumable
+- resets ephemeral Guided Review / crop-picker state
+- does not import API keys
+
+## Project Archive ZIP
+
+**Archive Project .zip** builds a portable ZIP entirely in the browser without a third-party ZIP library.
+
+The archive includes:
+
+- `project.json`
+- `audit-manifest.json`
+- `usage-report.json`
+- combined Markdown
+- combined plain text
+- combined LaTeX
+- original images
+- per-page JSON metadata
+- raw text
+- repaired text
+- final text
+- revision history
+- review flags
+- routing history
+- usage log
+- region crop images
+- region JSON/provenance
+- targeted result JSON and text
+
+The current ZIP writer uses the standard ZIP container with stored/uncompressed entries.
+
+For very large projects, this may consume substantial browser memory because the archive is assembled in memory before download.
+
+## Review Packages
+
+Each page can export a **Review package ZIP** containing the original image, transcription lineage, review flags, routing/provenance, targeted-region evidence, and review instructions.
+
+Each targeted region can export a **Region package ZIP** containing the crop, page context, candidate targeted results, provenance, and instructions emphasizing that model disagreement has no automatic winner.
+
+## Text Export Expansion
+
+Upgrade 10 adds:
+
+- combined Markdown
+- combined plain text
+- combined LaTeX
+- existing MathJax/PDF exports remain available
+
+The LaTeX exporter preserves recognized math spans and escapes prose conservatively.
+
+---
+
+# Usage / Cost Reporting
+
+Provider usage metadata is normalized where available.
+
+Recognized token fields include common OpenAI-compatible, Anthropic, and Gemini naming patterns.
+
+The project records whole-page usage events going forward and also includes targeted-region result usage.
+
+Cached whole-page replays are recorded but contribute zero estimated API cost.
+
+Users may enter separate per-million-token input/output rates for:
+
+- Primary AI
+- Secondary AI
+
+The app displays a live project usage summary and can export:
+
+`photo-to-text-usage-report.json`
+
+Cost values are estimates only.
+
+They are not provider invoices because:
+
+- provider usage metadata may be absent or incomplete
+- image pricing may not map cleanly to input/output token rates
+- cached/provider-specific pricing rules may differ
+- user-entered rates may be stale
+
+Do not hard-code provider prices into the application.
+
+---
+
+# Provenance / Audit Manifest
+
+Upgrade 10 adds a standalone audit manifest and includes it in project archives.
+
+The manifest summarizes:
+
+- page IDs/names/order
+- document membership
+- classification/status
+- image hash
+- processing fingerprint
+- latest provider/model/pass
+- approval timestamp
+- Needs Reapproval / Needs Refresh
+- revision count
+- review-flag count
+- routing-event count
+- targeted-region IDs/hashes/dependencies/results/events
+
+The audit manifest does not contain API keys.
+
+---
+
 # Doctor / Diagnostics
 
 The application includes a Doctor report.
@@ -906,6 +1053,12 @@ Diagnostics should remain action-oriented.
 26. deleting/reanchoring a region silently losing a stale dependency.
 27. Approved pages resolving targeted dependencies without preserving reapproval requirements.
 28. automatic whole-page routing operating on Needs Refresh pages.
+29. project/archive exports including API keys.
+30. project import replacing active work while requests are running.
+31. cached result replays being counted as new estimated API spend.
+32. page/region review packages omitting provenance needed to reproduce review decisions.
+33. archive export silently dropping original images or targeted crop evidence when those bytes are available.
+34. cost estimates being presented as provider billing truth.
 
 ---
 
@@ -1000,10 +1153,23 @@ Diagnostics should remain action-oriented.
 - previously Approved pages preserve reapproval lineage
 - whole-page retry remains available
 
-## Next
+### Upgrade 10 — Export / Archive / Review Packages
+- explicit versioned Save Project / Open Project
+- API-key-free safe settings export
+- dependency-free browser ZIP writer
+- full project archive with originals and transcription lineage
+- page Review package ZIP
+- targeted-region Review package ZIP
+- combined Markdown / plain text / LaTeX exports
+- normalized usage report
+- user-entered Primary/Secondary input/output rates
+- estimated project cost summary
+- standalone provenance/audit manifest
+- export safety regression checks
 
-### Upgrade 10
-Full project/archive export, portable review packages, cost/usage reporting.
+## Numbered roadmap complete
+
+The remaining backlog is hardening and optional high-accuracy work rather than a defined Upgrade 11.
 
 ---
 
