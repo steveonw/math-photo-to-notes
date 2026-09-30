@@ -20,7 +20,7 @@ The repository owner has explicitly permitted reuse of code and patterns from th
 
 # Current Status
 
-As of 2026-09-30, the project has completed the roadmap through **Upgrade 6**.
+As of 2026-09-30, the project has completed the roadmap through **Upgrade 7**.
 
 Implemented:
 
@@ -31,20 +31,28 @@ Implemented:
 - durable concurrent batch queue
 - pause/resume/cancel
 - transient retry/backoff
+- persistent document/notebook organization
+- stable page ordering and drag/drop
+- page metadata and page-number suggestions
+- document-scoped review and export groundwork
 
 The next active milestone is:
 
-## Upgrade 7 — Document Organization + Page Ordering
+## Upgrade 8 — Automatic Primary / Secondary Routing
 
-Planned next:
+Build automatic post-classification routing on top of the hardened queue engine.
 
-- notebook/document groups
-- page metadata
-- drag-and-drop ordering
-- page-number suggestions
-- group-aware navigation/export groundwork
+Requirements:
 
-Do not skip directly to advanced automatic AI routing unless the organization layer is deliberately deferred.
+- opt-in automation
+- independent per-pile Primary/Secondary choice
+- maximum AI-attempt limits
+- no retry loops
+- queue-aware routing
+- visible routing/retry history
+- Approved pages remain protected
+- Needs Reapproval is never auto-approved
+- explicit fresh-vs-cache behavior remains controllable
 
 ---
 
@@ -530,6 +538,55 @@ Viewing, zooming, or rotating the image does not invalidate approval because tho
 
 ---
 
+# Document Organization / Page Ordering
+
+Upgrade 7 added a persistent organization layer.
+
+Current capabilities:
+
+- named document / notebook groups
+- Unfiled pages
+- document filter
+- per-page document assignment
+- stable page order persisted with the project
+- drag-and-drop page reordering
+- document-scoped Guided Review navigation
+- document-specific Markdown export
+- document-specific PDF export
+
+Per-page metadata currently includes:
+
+- title
+- class
+- chapter
+- lecture
+- date
+- page number
+- tags
+
+Page-number suggestions are deterministic and non-destructive.
+
+Suggestion sources currently include:
+
+- explicit page-like filename patterns
+- numeric filename endings
+- transcription labels such as `Page 12`
+- isolated numeric lines near the beginning/end of a transcription
+
+A suggestion must never silently overwrite metadata or reorder pages.
+
+Users may:
+
+- accept one suggestion
+- dismiss one suggestion
+- explicitly apply available suggestions in the current document
+
+Changing organization metadata does not by itself invalidate transcription approval because it does not alter the final transcription text.
+
+Page ordering is represented by stable persisted item order. Queue processing follows the item order supplied when a queue is created, while a running durable queue retains its own job order.
+
+---
+
 # Doctor / Diagnostics
 
 The application includes a Doctor report.
@@ -571,6 +628,10 @@ Diagnostics should remain action-oriented.
 11. Approved pages remaining Approved after transcription edits.
 12. review flags disappearing silently after text edits.
 13. API keys being written into saved projects.
+14. page-number suggestions silently overwriting manual metadata.
+15. page-number suggestions automatically reordering pages.
+16. document filtering breaking Guided Review navigation.
+17. stale duplicated HTML being appended after the canonical closing document.
 
 ---
 
@@ -627,24 +688,33 @@ Diagnostics should remain action-oriented.
 - Retry-After
 - exponential backoff
 
-## Next
-
 ### Upgrade 7 — Document Organization + Page Ordering
+- persistent document/notebook groups
+- Unfiled pages
+- stable persisted order
+- drag-and-drop reordering
+- title/class/chapter/lecture/date/page/tags metadata
+- non-destructive page-number suggestions
+- explicit accept/dismiss/apply suggestion controls
+- document-scoped Guided Review
+- document Markdown/PDF export groundwork
 
-Build next:
-
-- notebook/document groups
-- page metadata
-- drag-and-drop ordering
-- page-number suggestions
-- stable order persistence
-- group-aware review navigation
-- groundwork for group-based export
-
-## Later
+## Next
 
 ### Upgrade 8
 Automatic Primary/Secondary routing using the hardened queue engine.
+
+Required protections:
+
+- opt-in automation
+- per-pile routing remains independent
+- bounded attempts
+- no recursive retry loops
+- preserve queue durability
+- preserve revision history
+- protect Approved pages
+
+## Later
 
 ### Upgrade 9
 Equation/region-only retries, model-disagreement review, dependency tracking, Needs Refresh.
