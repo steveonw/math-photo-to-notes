@@ -795,6 +795,35 @@ Acceptance criteria:
 
 **Next active release:** Release D — High Assurance Math.
 
+### Post-Release-C hardening — 2026-09-30
+
+Adversarial external-review testing found a math-specific transport hazard: JSON strings can legally reinterpret single-backslash LaTeX commands such as `\frac`, `\beta`, `\theta`, and `\neq` as JSON escape sequences before the app ever sees the intended math.
+
+Hardening now implemented:
+
+1. plain delimited external-return blocks are the preferred format:
+   - `=== PACKAGE ... ===`
+   - `=== PAGE ... ===`
+   - literal corrected transcription
+   - `=== NOTE ===`
+   - `=== END ===`
+2. LaTeX backslashes are preserved literally in the preferred return path
+3. external review packages now include `return-template.txt` as the primary return template
+4. JSON remains a compatibility fallback only
+5. JSON fallback scans for unsafe single-backslash LaTeX commands before parsing and rejects them with a specific error rather than allowing silent control-character corruption
+6. browser CI contains adversarial cases for `\frac`, `\beta`, `\theta`, `\neq`, and `\sqrt`
+7. the Good-page reliability ledger now has its own IndexedDB store, independent from the current project
+8. the browser DB version is upgraded to 2 to add the reliability store
+9. project Save/Open keeps a portable ledger snapshot, but opening a project merges that evidence into the global ledger instead of replacing it
+10. **Clear all** clears project pages/results while preserving accumulated reliability evidence
+11. CI verifies reliability evidence survives **Clear all plus a full page reload**
+12. external review export now offers:
+    - ZIP package
+    - **Loose images + text**
+13. Loose mode produces one chat-ready context/prompt text file plus the source images as individual downloads, while ZIP remains the reproducible archive path
+
+This hardening remains part of Release C's contract and should be regression-protected before Release D work.
+
 ---
 
 ## Release D — High Assurance Math
