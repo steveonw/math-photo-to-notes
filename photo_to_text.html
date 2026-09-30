@@ -859,6 +859,9 @@ function reanchorReviewFlags(i,oldText,newText){
    }else flag.detached=true;
  }
 }
+function documentOptionsHTML(selected){
+ return '<option value="">Unfiled</option>'+state.documents.map(d=>'<option value="'+esc(d.id)+'"'+(d.id===selected?' selected':'')+'>'+esc(d.name)+'</option>').join('');
+}
 function renderQueueStatus(){
  const status=$('queue-status'),pause=$('pause-queue'),concurrency=$('concurrency');
  if(concurrency)concurrency.disabled=!!state.running;
@@ -895,9 +898,10 @@ function render(){
    const text=versionText(i,mode);
    const lastPrev=i.history&&i.history.length?i.history[i.history.length-1]:null;
    return `
- <section class="panel card">
+ <section class="panel card" data-item-id="${esc(i.id)}" draggable="${state.guidedReview?'false':'true'}">
   <aside class="side">
-   <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}<div class="small">Attempts: Primary ${i.primaryAttempts||0} · Secondary ${i.secondaryAttempts||0} · Failures ${i.failures||0} · Transient retries ${i.transientRetries||0}</div>${i.imageHash?`<div class="small">Image hash: ${esc(i.imageHash.slice(0,12))}…</div>`:''}</div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
+   <div class="drag-handle">↕ Drag to reorder · Order ${Number(i.order||0)+1}</div>
+   <div style="display:flex;justify-content:space-between;gap:8px"><div><div class="small">Item</div><div class="name">${esc(i.name)}</div><span class="doc-chip">${esc(documentName(i.documentId))}</span>${i.lastModel?`<div class="small">Last pass: ${esc(i.lastPass||"")} · ${esc(i.lastProvider||"")} · ${esc(i.lastModel)}</div>`:""}<div class="small">Attempts: Primary ${i.primaryAttempts||0} · Secondary ${i.secondaryAttempts||0} · Failures ${i.failures||0} · Transient retries ${i.transientRetries||0}</div>${i.imageHash?`<div class="small">Image hash: ${esc(i.imageHash.slice(0,12))}…</div>`:''}</div><span class="badge ${badgeClass(i)}">${badgeLabel(i)}</span></div>
    ${i.url?`<div class="image-stage"><img id="image-${i.id}" class="preview" src="${i.url}" alt="${esc(i.name)}" style="transform:rotate(${Number(i.imageRotation||0)}deg) scale(${Number(i.imageZoom||1)});${i.imageFit==='width'?'width:100%;max-width:none;':'max-width:100%;max-height:68vh;'}"></div>
    <div class="image-tools">
     <button onclick="zoomImage('${i.id}',-0.15)">Zoom −</button>
@@ -922,6 +926,20 @@ function render(){
     <button onclick="manualClass('${i.id}','approved')">Approve</button>
     <button onclick="manualClass('${i.id}','failed')">Failed</button>
    </div>
+   <details class="metadata-box">
+    <summary>Document & page metadata</summary>
+    <label><span class="label">Document / notebook</span><select onchange="setItemDocument('${i.id}',this.value)">${documentOptionsHTML(i.documentId)}</select></label>
+    <div class="metadata-grid">
+      <label><span class="label">Title</span><input value="${esc(i.metadata?.title||'')}" oninput="updatePageMetadata('${i.id}','title',this.value)"></label>
+      <label><span class="label">Class</span><input value="${esc(i.metadata?.className||'')}" oninput="updatePageMetadata('${i.id}','className',this.value)"></label>
+      <label><span class="label">Chapter</span><input value="${esc(i.metadata?.chapter||'')}" oninput="updatePageMetadata('${i.id}','chapter',this.value)"></label>
+      <label><span class="label">Lecture</span><input value="${esc(i.metadata?.lecture||'')}" oninput="updatePageMetadata('${i.id}','lecture',this.value)"></label>
+      <label><span class="label">Date</span><input type="date" value="${esc(i.metadata?.date||'')}" onchange="updatePageMetadata('${i.id}','date',this.value)"></label>
+      <label><span class="label">Page number</span><input value="${esc(i.metadata?.pageNumber||'')}" oninput="updatePageMetadata('${i.id}','pageNumber',this.value)"></label>
+      <label style="grid-column:1/-1"><span class="label">Tags</span><input value="${esc(i.metadata?.tags||'')}" oninput="updatePageMetadata('${i.id}','tags',this.value)" placeholder="calculus, lecture 3, homework"></label>
+    </div>
+    ${i.pageNumberSuggestion?`<div class="page-suggestion"><b>Suggested page number:</b> ${esc(i.pageNumberSuggestion.value)} <span class="small">from ${esc(i.pageNumberSuggestion.source)}</span><br><button onclick="usePageSuggestion('${i.id}')">Use suggestion</button> <button onclick="dismissPageSuggestion('${i.id}')">Dismiss</button></div>`:''}
+   </details>
   </aside>
   <div class="main">
    <b>Transcription versions</b>
@@ -1005,6 +1023,28 @@ function queueMathPreview(id,text,delay=120){
  const timer=setTimeout(()=>{state.previewTimers.delete(id);renderMathPreview(id,text)},delay);
  state.previewTimers.set(id,timer);
 }
+window.setItemDocument=(id,documentId)=>{
+ const i=state.items.find(x=>x.id===id);if(!i)return;
+ i.documentId=documentId||'';
+ state.guidedItemId=null;scheduleAutosave();render();
+};
+window.updatePageMetadata=(id,key,value)=>{
+ const i=state.items.find(x=>x.id===id);if(!i)return;
+ i.metadata=i.metadata||{title:'',className:'',chapter:'',lecture:'',date:'',pageNumber:'',tags:''};
+ if(!(key in i.metadata))return;
+ i.metadata[key]=String(value??'');
+ if(key==='pageNumber'&&i.pageNumberSuggestion?.value===i.metadata.pageNumber)i.pageNumberSuggestion=null;
+ scheduleAutosave();renderOrganizationControls();
+};
+window.usePageSuggestion=id=>{
+ const i=state.items.find(x=>x.id===id);if(!i?.pageNumberSuggestion)return;
+ i.metadata=i.metadata||{};i.metadata.pageNumber=String(i.pageNumberSuggestion.value);i.dismissedPageSuggestion='';i.pageNumberSuggestion=null;
+ scheduleAutosave();render();
+};
+window.dismissPageSuggestion=id=>{
+ const i=state.items.find(x=>x.id===id);if(!i?.pageNumberSuggestion)return;
+ i.dismissedPageSuggestion=String(i.pageNumberSuggestion.value);i.pageNumberSuggestion=null;scheduleAutosave();render();
+};
 window.zoomImage=(id,delta)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.imageZoom=Math.max(.5,Math.min(3,Number(i.imageZoom||1)+delta));scheduleAutosave();render()};
 window.rotateImage=(id,delta)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.imageRotation=((Number(i.imageRotation||0)+delta)%360+360)%360;scheduleAutosave();render()};
 window.fitImage=(id,mode)=>{const i=state.items.find(x=>x.id===id);if(!i)return;i.imageFit=mode;i.imageZoom=1;scheduleAutosave();render()};
@@ -1045,8 +1085,9 @@ window.editText=(id,v)=>{
    i.classification=cl.classification;
    i.reason='Reclassified after manual text edit: '+cl.reason;
  }
+ refreshPageNumberSuggestion(i);
  queueMathPreview(id,v);
- scheduleAutosave();renderStats();
+ scheduleAutosave();renderStats();renderOrganizationControls();
 };
 window.manualClass=(id,c)=>{
  const i=state.items.find(x=>x.id===id);if(!i)return;
@@ -1078,7 +1119,7 @@ window.restorePrevious=id=>{
 window.cancelItem=id=>{
  const ctrl=state.activeControllers.get(id);if(ctrl)ctrl.abort();
 };
-window.removeById=id=>{const i=state.items.find(x=>x.id===id);if(i&&i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url);const ctrl=state.activeControllers.get(id);if(ctrl)ctrl.abort();state.items=state.items.filter(x=>x.id!==id);scheduleAutosave();render()};
+window.removeById=id=>{const i=state.items.find(x=>x.id===id);if(i&&i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url);const ctrl=state.activeControllers.get(id);if(ctrl)ctrl.abort();state.items=state.items.filter(x=>x.id!==id);normalizeItemOrder();scheduleAutosave();render()};
 
 function dataURL(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result||''));r.onerror=()=>rej(new Error('Failed to read '+file.name));r.readAsDataURL(file)})}
 function b64(d){return d.split(',')[1]||''}
@@ -1238,7 +1279,7 @@ async function runOne(i,s,{forceFresh=false}={}){
    i.repairs=repaired.repairs;i.validationWarnings=validationWarnings;i.validationDetails=validationDetails;i.mathRenderWarnings=[];i.truncated=!!result.truncated;i.stopReason=result.stopReason||'';
    i.usage=result.usage||null;i.status='done';i.classification=cl.classification;i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
    i.reason=(cached?'Reused exact cached result. ':'')+(repaired.repairs.length?'Auto-repaired '+repaired.repairs.length+' common LaTeX artifact'+(repaired.repairs.length===1?'':'s')+'. ':'')+cl.reason;
-   i.error='';i.lastError='';i.retryNotBefore='';
+   i.error='';i.lastError='';i.retryNotBefore='';refreshPageNumberSuggestion(i);
    if(!cached&&fingerprint)await cachePut(fingerprint,{schema:PROJECT_SCHEMA,createdAt:new Date().toISOString(),rawText,result:{truncated:!!result.truncated,stopReason:result.stopReason||''},truncated:!!result.truncated,stopReason:result.stopReason||'',usage:result.usage||null,provider:s.provider,model:s.model});
    return {outcome:'done'};
  }catch(e){
@@ -1380,6 +1421,9 @@ async function runA2SelfTests(){
    const a=await sha256Hex('same'),b=await sha256Hex('same'),d=await sha256Hex('different');
    test('fingerprint hashing is deterministic',a===b&&a!==d&&a.length===64);
  }
+ test('filename page-number suggestion is non-destructive',suggestPageNumber({name:'notes-page-012.jpg',metadata:{pageNumber:''},finalText:''})?.value==='12');
+ const orderProbe=[{id:'a',order:2},{id:'b',order:1}];
+ test('page-number suggestion does not mutate metadata',!('pageNumber' in (orderProbe[0].metadata||{})));
  return {passed:tests.filter(x=>x.ok).length,total:tests.length,tests};
 }
 
@@ -1423,6 +1467,56 @@ async function runDoctor(){
 }
 $('doctor').onclick=()=>runDoctor();
 
+$('document-filter').onchange=e=>{state.documentFilter=e.target.value||'all';state.guidedItemId=null;scheduleAutosave();render()};
+$('new-document').onclick=()=>{
+ const raw=prompt('New document / notebook name:','');if(raw===null)return;
+ const name=raw.trim();if(!name)return;
+ const id=crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random();
+ state.documents.push({id,name,createdAt:new Date().toISOString()});state.documentFilter=id;state.guidedItemId=null;scheduleAutosave();render();
+};
+$('rename-document').onclick=()=>{
+ const d=state.documents.find(x=>x.id===state.documentFilter);if(!d)return;
+ const raw=prompt('Rename document / notebook:',d.name);if(raw===null)return;
+ const name=raw.trim();if(!name)return;d.name=name;scheduleAutosave();render();
+};
+$('delete-document').onclick=()=>{
+ const d=state.documents.find(x=>x.id===state.documentFilter);if(!d)return;
+ if(!confirm('Delete the group "'+d.name+'"? Its pages will be moved to Unfiled.'))return;
+ for(const i of state.items)if(i.documentId===d.id)i.documentId='';
+ state.documents=state.documents.filter(x=>x.id!==d.id);state.documentFilter='unfiled';state.guidedItemId=null;scheduleAutosave();render();
+};
+$('apply-page-suggestions').onclick=()=>{
+ const list=organizationScopedItems();let count=0;
+ for(const i of list){
+   if(i.pageNumberSuggestion&&!i.metadata?.pageNumber){
+     i.metadata=i.metadata||{};i.metadata.pageNumber=String(i.pageNumberSuggestion.value);i.pageNumberSuggestion=null;i.dismissedPageSuggestion='';count++;
+   }
+ }
+ scheduleAutosave();render();alert(count?'Applied '+count+' page-number suggestion'+(count===1?'':'s')+'.':'No unapplied page-number suggestions in this document.');
+};
+function moveItemRelative(dragId,targetId,after){
+ if(!dragId||!targetId||dragId===targetId)return;
+ const from=state.items.findIndex(x=>x.id===dragId);if(from<0)return;
+ const item=state.items.splice(from,1)[0];
+ let to=state.items.findIndex(x=>x.id===targetId);if(to<0){state.items.splice(from,0,item);return}
+ if(after)to++;
+ state.items.splice(to,0,item);normalizeItemOrder();scheduleAutosave();render();
+}
+els.results.addEventListener('dragstart',e=>{
+ const card=e.target.closest('.card[data-item-id]');if(!card||state.guidedReview){e.preventDefault();return}
+ state.dragItemId=card.dataset.itemId;card.classList.add('dragging');e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',state.dragItemId);
+});
+els.results.addEventListener('dragover',e=>{
+ const card=e.target.closest('.card[data-item-id]');if(!card||!state.dragItemId)return;e.preventDefault();
+ document.querySelectorAll('.card.drop-target').forEach(x=>x.classList.remove('drop-target'));card.classList.add('drop-target');e.dataTransfer.dropEffect='move';
+});
+els.results.addEventListener('drop',e=>{
+ const card=e.target.closest('.card[data-item-id]');if(!card||!state.dragItemId)return;e.preventDefault();
+ const r=card.getBoundingClientRect(),after=e.clientY>r.top+r.height/2;moveItemRelative(state.dragItemId,card.dataset.itemId,after);
+ state.dragItemId=null;
+});
+els.results.addEventListener('dragend',()=>{state.dragItemId=null;document.querySelectorAll('.card.dragging,.card.drop-target').forEach(x=>x.classList.remove('dragging','drop-target'))});
+
 $('tabs').onclick=e=>{
  const b=e.target.closest('button[data-filter]');if(!b)return;
  state.filter=b.dataset.filter;state.guidedItemId=null;document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===b));render();
@@ -1457,12 +1551,33 @@ function download(name,content){
  a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(u);
 }
 function mdFor(list){
- return list.map((i,n)=>`# ${i.name}\n\nStatus: ${i.classification}\nReason: ${i.reason||''}\n\n${i.text||''}`).join('\n\n---\n\n')
+ return list.map((i,n)=>{
+   const m=i.metadata||{},meta=[
+     'Document: '+documentName(i.documentId),
+     m.title?'Title: '+m.title:'',
+     m.className?'Class: '+m.className:'',
+     m.chapter?'Chapter: '+m.chapter:'',
+     m.lecture?'Lecture: '+m.lecture:'',
+     m.date?'Date: '+m.date:'',
+     m.pageNumber?'Page: '+m.pageNumber:'',
+     m.tags?'Tags: '+m.tags:'',
+     'Status: '+i.classification,
+     'Reason: '+(i.reason||'')
+   ].filter(Boolean).join('\n');
+   return '# '+(m.title||i.name)+'\n\n'+meta+'\n\n'+(i.text||'');
+ }).join('\n\n---\n\n')
 }
 $('download-all').onclick=()=>download('photo-to-text-all.md',mdFor(state.items.filter(i=>i.text)));
 $('download-review').onclick=()=>download('photo-to-text-review.md',mdFor(state.items.filter(i=>i.classification==='review')));
 $('download-unclear').onclick=()=>download('photo-to-text-unclear.md',mdFor(state.items.filter(i=>i.classification==='unclear')));
 $('download-failed').onclick=()=>download('photo-to-text-failed.txt',state.items.filter(i=>i.classification==='failed').map(i=>`${i.name}\n${i.error||i.reason}`).join('\n\n---\n\n'));
+$('download-document').onclick=()=>{
+ if(state.documentFilter==='all'){alert('Choose a document or Unfiled first.');return}
+ const list=organizationScopedItems().filter(i=>i.text);
+ const label=state.documentFilter==='unfiled'?'unfiled':documentName(state.documentFilter);
+ if(!list.length){alert('There is no transcribed text in this document.');return}
+ download(slug(label)+'.md',mdFor(list));
+};
 
 function htmlEscape(s){
  return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')
@@ -1478,8 +1593,8 @@ function exportPdfPile(list,title){
  const sections=usable.map((i,n)=>`
  <section class="page">
    <div class="meta">
-     <div class="filename">${htmlEscape(i.name)}</div>
-     <div class="status">Status: ${htmlEscape(i.classification)}${i.reason ? ' — '+htmlEscape(i.reason) : ''}</div>
+     <div class="filename">${htmlEscape(i.metadata?.title||i.name)}${i.metadata?.pageNumber?' — Page '+htmlEscape(i.metadata.pageNumber):''}</div>
+     <div class="status">Document: ${htmlEscape(documentName(i.documentId))} · Status: ${htmlEscape(i.classification)}${i.reason ? ' — '+htmlEscape(i.reason) : ''}</div>
    </div>
    <div class="transcription">${textToPrintableHTML(i.text)}</div>
  </section>`).join('');
@@ -1569,8 +1684,13 @@ $('pdf-review').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification
 $('pdf-unclear').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='unclear'),'Photo-to-Text — Unclear pile');
 $('pdf-mathunsure').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='mathunsure'),'Photo-to-Text — Math Unsure pile');
 $('pdf-approved').onclick=()=>exportPdfPile(state.items.filter(i=>i.classification==='approved'),'Photo-to-Text — Approved');
+$('pdf-document').onclick=()=>{
+ if(state.documentFilter==='all'){alert('Choose a document or Unfiled first.');return}
+ const label=state.documentFilter==='unfiled'?'Unfiled':documentName(state.documentFilter);
+ exportPdfPile(organizationScopedItems(),'Photo-to-Text — '+label);
+};
 
-$('clear').onclick=async()=>{if(!confirm('Clear all loaded images and results?'))return;state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});for(const ctrl of state.activeControllers.values())ctrl.abort();state.items=[];await clearAutosave();render()};
+$('clear').onclick=async()=>{if(!confirm('Clear all loaded images and results?'))return;state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});for(const ctrl of state.activeControllers.values())ctrl.abort();state.items=[];state.documents=[];state.documentFilter='all';state.guidedItemId=null;await clearAutosave();render()};
 
 loadSettings();
 restoreProjectState().then(()=>{
