@@ -998,6 +998,45 @@ function extractAnthropic(j){return (j?.content||[]).filter(x=>x?.type==='text')
 function extractGemini(j){return (j?.candidates?.[0]?.content?.parts||[]).map(x=>x?.text||'').filter(Boolean).join('\n\n').trim()}
 function extractCompatible(j){const c=j?.choices?.[0]?.message?.content;if(typeof c==='string')return c.trim();if(Array.isArray(c))return c.map(x=>x?.text||'').filter(Boolean).join('\n\n').trim();return ''}
 
+function parseRetryAfterMs(response){
+ const raw=response?.headers?.get?.('retry-after');
+ if(!raw)return 0;
+ const seconds=Number(raw);
+ if(Number.isFinite(seconds))return Math.max(0,seconds*1000);
+ const at=Date.parse(raw);
+ return Number.isFinite(at)?Math.max(0,at-Date.now()):0;
+}
+function providerHttpError(response,payload,fallback){
+ const message=payload?.error?.message||payload?.message||fallback||('HTTP '+response.status);
+ const e=new Error(message);
+ e.status=response.status;
+ e.retryAfterMs=parseRetryAfterMs(response);
+ e.transient=[408,409,425,429,500,502,503,504].includes(response.status);
+ return e;
+}
+function isTransientError(e){
+ return !!(e?.transient||e instanceof TypeError||[408,409,425,429,500,502,503,504].includes(Number(e?.status)));
+}
+function transientDelayMs(e,retryIndex){
+ const hinted=Number(e?.retryAfterMs||0);
+ if(hinted>0)return Math.min(hinted,120000);
+ return Math.min(BASE_RETRY_DELAY_MS*Math.pow(2,retryIndex),30000);
+}
+function sleepWithSignal(ms,signal){
+ return new Promise((resolve,reject)=>{
+   if(signal?.aborted)return reject(signal.reason||new DOMException('Aborted','AbortError'));
+   const t=setTimeout(done,ms);
+   function done(){cleanup();resolve()}
+   function aborted(){clearTimeout(t);cleanup();reject(signal.reason||new DOMException('Aborted','AbortError'))}
+   function cleanup(){signal?.removeEventListener?.('abort',aborted)}
+   signal?.addEventListener?.('abort',aborted,{once:true});
+ });
+}
+async function waitWhileQueuePaused(signal){
+ while(state.queuePlan&&state.queuePaused){
+   await sleepWithSignal(200,signal);
+ }
+}
 async function transcribe(item,s,signal){
  if(!item.file)throw new Error('Original image is unavailable after restore. Re-add the image before retrying.');
  const d=item.imageData||await dataURL(item.file), base=b64(d), mime=item.file.type||'image/jpeg';
@@ -1005,49 +1044,65 @@ async function transcribe(item,s,signal){
  const fetchOpts=(body,headers)=>({method:'POST',headers,body:JSON.stringify(body),signal});
  if(s.provider==='openai'){
    response=await fetch('https://api.openai.com/v1/responses',fetchOpts({model:s.model,input:[{role:'user',content:[{type:'input_text',text:s.prompt},{type:'input_image',image_url:d}]}]},{'Content-Type':'application/json','Authorization':'Bearer '+s.apiKey}));
-   j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'OpenAI request failed.'); text=extractOpenAI(j);
+   j=await response.json().catch(()=>null); if(!response.ok)throw providerHttpError(response,j,'OpenAI request failed.'); text=extractOpenAI(j);
    stopReason=j?.incomplete_details?.reason||j?.status||''; truncated=j?.status==='incomplete'||/max.*token|length/i.test(stopReason);usage=j?.usage||null;
  }else if(s.provider==='anthropic'){
    response=await fetch('https://api.anthropic.com/v1/messages',fetchOpts({model:s.model,max_tokens:4096,temperature:0,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:mime,data:base}},{type:'text',text:s.prompt}]}]},{'Content-Type':'application/json','x-api-key':s.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'}));
-   j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'Anthropic request failed.'); text=extractAnthropic(j);
+   j=await response.json().catch(()=>null); if(!response.ok)throw providerHttpError(response,j,'Anthropic request failed.'); text=extractAnthropic(j);
    stopReason=j?.stop_reason||''; truncated=stopReason==='max_tokens';usage=j?.usage||null;
  }else if(s.provider==='gemini'){
-   const ep=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent?key=${encodeURIComponent(s.apiKey)}`;
+   const ep='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(s.model)+':generateContent?key='+encodeURIComponent(s.apiKey);
    response=await fetch(ep,fetchOpts({contents:[{parts:[{text:s.prompt},{inlineData:{mimeType:mime,data:base}}]}],generationConfig:{temperature:0}},{'Content-Type':'application/json'}));
-   j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'Gemini request failed.'); text=extractGemini(j);
+   j=await response.json().catch(()=>null); if(!response.ok)throw providerHttpError(response,j,'Gemini request failed.'); text=extractGemini(j);
    stopReason=j?.candidates?.[0]?.finishReason||''; truncated=/MAX_TOKENS|TOKEN/i.test(stopReason);usage=j?.usageMetadata||null;
  }else{
    const u=s.baseUrl.replace(/\/$/,''); if(!u)throw new Error('Enter a compatible base URL.');
    response=await fetch(u+'/chat/completions',fetchOpts({model:s.model,messages:[{role:'user',content:[{type:'text',text:s.prompt},{type:'image_url',image_url:{url:d}}]}],temperature:0},{'Content-Type':'application/json','Authorization':'Bearer '+s.apiKey}));
-   j=await response.json(); if(!response.ok)throw new Error(j?.error?.message||'Compatible-provider request failed.'); text=extractCompatible(j);
+   j=await response.json().catch(()=>null); if(!response.ok)throw providerHttpError(response,j,'Compatible-provider request failed.'); text=extractCompatible(j);
    stopReason=j?.choices?.[0]?.finish_reason||''; truncated=stopReason==='length';usage=j?.usage||null;
  }
  if(!text)throw new Error('No text returned by provider.');
  return {text,truncated,stopReason,usage};
 }
+async function transcribeWithTimeout(item,s,masterSignal){
+ const attemptController=new AbortController();
+ let timedOut=false;
+ const forwardAbort=()=>attemptController.abort(masterSignal.reason||new DOMException('Cancelled','AbortError'));
+ if(masterSignal.aborted)forwardAbort();
+ else masterSignal.addEventListener('abort',forwardAbort,{once:true});
+ const timeout=setTimeout(()=>{timedOut=true;attemptController.abort(new DOMException('Request timed out','AbortError'))},REQUEST_TIMEOUT_MS);
+ try{
+   return await transcribe(item,s,attemptController.signal);
+ }catch(e){
+   if(timedOut){
+     const t=new Error('Request timed out.');
+     t.transient=true;t.code='timeout';throw t;
+   }
+   throw e;
+ }finally{
+   clearTimeout(timeout);
+   masterSignal.removeEventListener('abort',forwardAbort);
+ }
+}
 
 function snapPrimary(){return{provider:els.provider.value,model:els.model.value.trim(),apiKey:els.apikey.value.trim(),baseUrl:els.baseurl.value.trim(),prompt:els.prompt.value,pass:'primary'}}
 function snapSecondary(){return{provider:els.provider2.value,model:els.model2.value.trim(),apiKey:els.apikey2.value.trim(),baseUrl:els.baseurl2.value.trim(),prompt:els.prompt.value,pass:'secondary'}}
-
-function snapForChoice(choice){
- return choice==='secondary' ? snapSecondary() : snapPrimary();
-}
-
-function validateSnap(s){if(!s.apiKey){alert(`Enter the ${s.pass||'selected'} AI API key first.`);return false}if(!s.model){alert('Enter a model name.');return false}if(s.provider==='compatible'&&!s.baseUrl){alert('Enter a compatible base URL.');return false}return true}
+function snapForChoice(choice){return choice==='secondary'?snapSecondary():snapPrimary()}
+function snapForQueuePlan(plan){return plan?.pass==='secondary'?snapSecondary():snapPrimary()}
+function validateSnap(s){if(!s.apiKey){alert('Enter the '+(s.pass||'selected')+' AI API key first.');return false}if(!s.model){alert('Enter a model name.');return false}if(s.provider==='compatible'&&!s.baseUrl){alert('Enter a compatible base URL.');return false}return true}
 
 async function runOne(i,s,{forceFresh=false}={}){
- if(i.classification==='approved')return;
- if(i.status==='running')return;
+ if(i.classification==='approved')return {outcome:'skipped'};
+ if(i.status==='running')return {outcome:'skipped'};
  const attemptId=(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random());
- const controller=new AbortController();
- state.activeControllers.set(i.id,controller);
+ const masterController=new AbortController();
+ state.activeControllers.set(i.id,masterController);
  i.activeAttemptId=attemptId;i.lastAttemptId=attemptId;
  pushRevision(i,'Before '+(s.pass||'primary')+' retry');
  if((s.pass||'primary')==='secondary')i.secondaryAttempts=(i.secondaryAttempts||0)+1;
  else i.primaryAttempts=(i.primaryAttempts||0)+1;
  i.status='running';i.classification='queued';i.reason='Processing…';i.error='';i.editingSnapshotTaken=false;
- const timeout=setTimeout(()=>controller.abort(new DOMException('Request timed out','AbortError')),REQUEST_TIMEOUT_MS);
- render();
+ i.retryNotBefore='';render();
  try{
    const fingerprint=await processingFingerprint(i,s);
    i.lastFingerprint=fingerprint;
@@ -1056,8 +1111,30 @@ async function runOne(i,s,{forceFresh=false}={}){
      const hit=await cacheGet(fingerprint);
      if(hit&&hit.rawText){result={text:hit.rawText,truncated:!!hit.truncated,stopReason:hit.stopReason||'',usage:hit.usage||null};cached=true}
    }
-   if(!result)result=await transcribe(i,s,controller.signal);
-   if(i.activeAttemptId!==attemptId)return;
+   if(!result){
+     let retryIndex=0;
+     while(true){
+       try{
+         await waitWhileQueuePaused(masterController.signal);
+         result=await transcribeWithTimeout(i,s,masterController.signal);
+         break;
+       }catch(e){
+         if(masterController.signal.aborted)throw masterController.signal.reason||new DOMException('Cancelled','AbortError');
+         if(!isTransientError(e)||retryIndex>=MAX_TRANSIENT_RETRIES)throw e;
+         const delay=transientDelayMs(e,retryIndex);
+         retryIndex++;
+         i.transientRetries=(i.transientRetries||0)+1;
+         i.transientErrors=i.transientErrors||[];
+         i.transientErrors.push({at:new Date().toISOString(),message:e instanceof Error?e.message:String(e),status:e?.status||'',retry:retryIndex,delayMs:delay});
+         if(i.transientErrors.length>20)i.transientErrors.shift();
+         i.retryNotBefore=new Date(Date.now()+delay).toISOString();
+         i.reason=(e?.status===429?'Rate limited':'Temporary provider/network failure')+'; retrying in '+Math.ceil(delay/1000)+'s ('+retryIndex+'/'+MAX_TRANSIENT_RETRIES+').';
+         scheduleAutosave();render();
+         await sleepWithSignal(delay,masterController.signal);
+       }
+     }
+   }
+   if(i.activeAttemptId!==attemptId)return {outcome:'stale'};
    const rawText=result.text;
    const repaired=repairLatexForMathJax(rawText);
    let cl=classifyText(repaired.text);
@@ -1067,46 +1144,129 @@ async function runOne(i,s,{forceFresh=false}={}){
    i.rawText=rawText;i.repairedText=repaired.text;i.finalText=repaired.text;i.text=i.finalText;
    i.repairs=repaired.repairs;i.validationWarnings=validationWarnings;i.validationDetails=validationDetails;i.mathRenderWarnings=[];i.truncated=!!result.truncated;i.stopReason=result.stopReason||'';
    i.usage=result.usage||null;i.status='done';i.classification=cl.classification;i.lastProvider=s.provider;i.lastModel=s.model;i.lastPass=s.pass||'primary';
-   i.reason=(cached?'Reused exact cached result. ':'')+(repaired.repairs.length?`Auto-repaired ${repaired.repairs.length} common LaTeX artifact${repaired.repairs.length===1?'':'s'}. `:'')+cl.reason;
-   i.error='';i.lastError='';
+   i.reason=(cached?'Reused exact cached result. ':'')+(repaired.repairs.length?'Auto-repaired '+repaired.repairs.length+' common LaTeX artifact'+(repaired.repairs.length===1?'':'s')+'. ':'')+cl.reason;
+   i.error='';i.lastError='';i.retryNotBefore='';
    if(!cached&&fingerprint)await cachePut(fingerprint,{schema:PROJECT_SCHEMA,createdAt:new Date().toISOString(),rawText,result:{truncated:!!result.truncated,stopReason:result.stopReason||''},truncated:!!result.truncated,stopReason:result.stopReason||'',usage:result.usage||null,provider:s.provider,model:s.model});
+   return {outcome:'done'};
  }catch(e){
-   if(i.activeAttemptId!==attemptId)return;
-   if(e?.name==='AbortError'){
-     i.status='interrupted';i.classification='interrupted';i.error='';i.reason='Request cancelled or timed out. Safe to resume.';
-   }else{
-     i.failures=(i.failures||0)+1;i.status='error';i.classification='failed';i.error=e instanceof Error?e.message:String(e);i.lastError=i.error;
-     i.reason='The API/browser request failed, so no usable transcription was produced.';
+   if(i.activeAttemptId!==attemptId)return {outcome:'stale'};
+   if(masterController.signal.aborted||e?.name==='AbortError'){
+     i.status='interrupted';i.classification='interrupted';i.error='';i.reason='Request cancelled. Safe to resume.';i.retryNotBefore='';
+     return {outcome:'interrupted'};
    }
+   if(isTransientError(e)){
+     i.status='interrupted';i.classification='interrupted';i.error='';i.lastError=e instanceof Error?e.message:String(e);
+     i.reason='Temporary provider/network failure persisted after automatic retries. Safe to resume later.';
+     i.retryNotBefore='';
+     return {outcome:'interrupted'};
+   }
+   i.failures=(i.failures||0)+1;i.status='error';i.classification='failed';i.error=e instanceof Error?e.message:String(e);i.lastError=i.error;
+   i.reason='The API/browser request failed, so no usable transcription was produced.';
+   i.retryNotBefore='';
+   return {outcome:'failed'};
  }finally{
-   clearTimeout(timeout);
    if(i.activeAttemptId===attemptId)i.activeAttemptId='';
    state.activeControllers.delete(i.id);
+   if(!state.queuePlan&&!state.activeControllers.size)state.running=false;
    scheduleAutosave();render();
  }
 }
 
-window.runSingleById=async id=>{if(state.running)return;const i=state.items.find(x=>x.id===id);if(!i)return;if(i.classification==='approved'){alert('Unapprove this page before retrying it.');return}const s=snapPrimary();if(!validateSnap(s))return;await runOne(i,s,{forceFresh:true})};
+window.runSingleById=async id=>{
+ if(state.running||state.activeControllers.size)return;
+ const i=state.items.find(x=>x.id===id);if(!i)return;
+ if(i.classification==='approved'){alert('Unapprove this page before retrying it.');return}
+ const s=snapPrimary();if(!validateSnap(s))return;
+ state.running=true;await runOne(i,s,{forceFresh:true});state.running=false;render();
+};
 
-async function runList(list,s){
- if(state.running)return;
- if(!list.length){alert('There are no items in this pile to process.');return;}
- if(!s) s=snapPrimary();
- if(!validateSnap(s))return;
- state.running=true;state.cancelRequested=false;
- ['run','retry-current-primary','retry-review','retry-unclear','retry-mathunsure','retry-failed'].forEach(id=>{const b=$(id);if(b)b.disabled=true});
- for(const i of list){if(state.cancelRequested)break;await runOne(i,s,{forceFresh:i.status!=='queued'})}
- state.running=false;state.cancelRequested=false;
- ['run','retry-current-primary','retry-review','retry-unclear','retry-mathunsure','retry-failed'].forEach(id=>{const b=$(id);if(b)b.disabled=false});
- render();
+function queueConcurrency(){
+ const n=Number($('concurrency')?.value||2);
+ return Math.max(1,Math.min(6,Number.isFinite(n)?n:2));
 }
-$('run').onclick=()=>runList(state.items.filter(i=>i.status==='queued'||i.status==='interrupted'),snapPrimary());
-$('cancel-batch').onclick=()=>{state.cancelRequested=true;for(const ctrl of state.activeControllers.values())ctrl.abort();};
-$('retry-current-primary').onclick=()=>runList(visibleItems().filter(i=>i.status!=='running'&&i.classification!=='approved'),snapForChoice($('current-ai').value));
-$('retry-review').onclick=()=>runList(state.items.filter(i=>i.classification==='review'),snapForChoice($('review-ai').value));
-$('retry-unclear').onclick=()=>runList(state.items.filter(i=>i.classification==='unclear'),snapForChoice($('unclear-ai').value));
-$('retry-mathunsure').onclick=()=>runList(state.items.filter(i=>i.classification==='mathunsure'),snapForChoice($('mathunsure-ai').value));
-$('retry-failed').onclick=()=>runList(state.items.filter(i=>i.classification==='failed'),snapForChoice($('failed-ai').value));
+function queueButtonsDisabled(disabled){
+ ['run','retry-current-primary','retry-review','retry-unclear','retry-mathunsure','retry-failed'].forEach(id=>{const b=$(id);if(b)b.disabled=!!disabled});
+}
+function startQueue(list,s){
+ if(state.running||state.activeControllers.size){alert('A queue or request is already running.');return}
+ if(!list.length){alert('There are no items in this pile to process.');return}
+ if(!s)s=snapPrimary();
+ if(!validateSnap(s))return;
+ const seen=new Set();
+ const jobs=[];
+ for(const item of list){
+   if(!item||seen.has(item.id)||item.classification==='approved'||item.status==='running')continue;
+   seen.add(item.id);
+   jobs.push({id:item.id,state:'pending',forceFresh:!(item.status==='queued'||item.status==='interrupted'),createdAt:new Date().toISOString()});
+ }
+ if(!jobs.length){alert('There are no eligible items to process.');return}
+ state.queuePlan={id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random(),pass:s.pass||'primary',provider:s.provider,model:s.model,createdAt:new Date().toISOString(),jobs};
+ state.queueRuntimeSnap=s;state.queuePaused=false;state.cancelRequested=false;state.running=true;
+ queueButtonsDisabled(true);scheduleAutosave();render();pumpQueue();
+}
+function finishQueueIfDone(){
+ const plan=state.queuePlan;if(!plan)return false;
+ const jobs=plan.jobs||[];
+ if(jobs.some(j=>j.state==='pending'||j.state==='running'))return false;
+ state.queuePlan=null;state.queueRuntimeSnap=null;state.queuePaused=false;state.running=false;state.cancelRequested=false;
+ queueButtonsDisabled(false);scheduleAutosave();render();return true;
+}
+function pumpQueue(){
+ const plan=state.queuePlan;
+ if(!plan||state.queuePaused||state.cancelRequested)return;
+ if(!state.queueRuntimeSnap){
+   state.queuePaused=true;render();scheduleAutosave();return;
+ }
+ if(finishQueueIfDone())return;
+ let active=plan.jobs.filter(j=>j.state==='running').length;
+ const limit=queueConcurrency();
+ while(active<limit){
+   const job=plan.jobs.find(j=>j.state==='pending');
+   if(!job)break;
+   const item=state.items.find(x=>x.id===job.id);
+   if(!item){job.state='done';job.finishedAt=new Date().toISOString();continue}
+   job.state='running';job.startedAt=new Date().toISOString();active++;
+   scheduleAutosave();renderQueueStatus();
+   runOne(item,state.queueRuntimeSnap,{forceFresh:!!job.forceFresh}).then(result=>{
+     if(state.queuePlan!==plan)return;
+     job.state='done';job.finishedAt=new Date().toISOString();job.outcome=result?.outcome||'done';
+     scheduleAutosave();
+     if(!finishQueueIfDone())pumpQueue();
+   }).catch(e=>{
+     if(state.queuePlan!==plan)return;
+     job.state='done';job.finishedAt=new Date().toISOString();job.outcome='failed';job.error=e instanceof Error?e.message:String(e);
+     scheduleAutosave();
+     if(!finishQueueIfDone())pumpQueue();
+   });
+ }
+ renderQueueStatus();
+}
+function pauseQueue(){
+ if(!state.queuePlan)return;
+ state.queuePaused=true;scheduleAutosave();render();
+}
+function resumeQueue(){
+ if(!state.queuePlan)return;
+ const s=snapForQueuePlan(state.queuePlan);
+ if(!validateSnap(s))return;
+ state.queueRuntimeSnap=s;state.queuePaused=false;state.running=true;queueButtonsDisabled(true);scheduleAutosave();render();pumpQueue();
+}
+function cancelQueue(){
+ state.cancelRequested=true;state.queuePaused=false;
+ for(const ctrl of state.activeControllers.values())ctrl.abort(new DOMException('Batch cancelled','AbortError'));
+ state.queuePlan=null;state.queueRuntimeSnap=null;
+ state.running=state.activeControllers.size>0;
+ queueButtonsDisabled(state.running);
+ scheduleAutosave();render();
+}
+$('run').onclick=()=>startQueue(state.items.filter(i=>i.status==='queued'||i.status==='interrupted'),snapPrimary());
+$('pause-queue').onclick=()=>state.queuePaused?resumeQueue():pauseQueue();
+$('cancel-batch').onclick=()=>cancelQueue();
+$('retry-current-primary').onclick=()=>startQueue(visibleItems().filter(i=>i.status!=='running'&&i.classification!=='approved'),snapForChoice($('current-ai').value));
+$('retry-review').onclick=()=>startQueue(state.items.filter(i=>i.classification==='review'),snapForChoice($('review-ai').value));
+$('retry-unclear').onclick=()=>startQueue(state.items.filter(i=>i.classification==='unclear'),snapForChoice($('unclear-ai').value));
+$('retry-mathunsure').onclick=()=>startQueue(state.items.filter(i=>i.classification==='mathunsure'),snapForChoice($('mathunsure-ai').value));
+$('retry-failed').onclick=()=>startQueue(state.items.filter(i=>i.classification==='failed'),snapForChoice($('failed-ai').value));
 
 async function runA2SelfTests(){
  const tests=[];
@@ -1141,6 +1301,9 @@ async function runDoctor(){
    ['Web Crypto',crypto?.subtle?'Available':'Unavailable — hashes/cache fingerprints disabled'],
    ['AbortController',typeof AbortController!=='undefined'?'Available':'Unavailable'],
    ['Request timeout',Math.round(REQUEST_TIMEOUT_MS/1000)+' seconds'],
+   ['Concurrency',String(queueConcurrency())],
+   ['Transient retry limit',String(MAX_TRANSIENT_RETRIES)],
+   ['Durable queue',state.queuePlan?(state.queuePaused?'Paused / resumable':'Active'):'Idle'],
    ['Cached results',String(cacheCount)],
    ['Interrupted jobs',String(interrupted)],
    ['A2 self-tests',selfTests.passed+'/'+selfTests.total+' passed'],
@@ -1313,6 +1476,7 @@ $('clear').onclick=async()=>{if(!confirm('Clear all loaded images and results?')
 
 loadSettings();
 restoreProjectState().then(()=>{
+ if(state.queuePlan){state.queuePaused=true;state.running=false;queueButtonsDisabled(false)}
  const active=document.querySelector('#tabs button[data-filter="'+state.filter+'"]');
  if(active)document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===active));
  render();
