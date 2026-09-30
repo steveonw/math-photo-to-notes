@@ -20,7 +20,7 @@ Release C adds **Review with External AI** as a full export/import round trip. P
 
 Post-Release-C hardening makes math returns **LaTeX-safe**. The preferred external-AI response is now a plain `=== PAGE ... ===` block format, so commands such as `\frac`, `\theta`, and `\neq` do not pass through JSON escape semantics. JSON remains a fallback, but unsafe single-backslash LaTeX is rejected instead of silently corrupted. External review can be exported either as a ZIP or as **Loose images + text** for direct chat upload. The spot-check reliability ledger is also stored separately in IndexedDB and survives **Clear all** and reload; project files carry a portable snapshot that merges into the global ledger.
 
-**High Assurance Math** is shown as a disabled future option and is not active yet.
+Release D activates **High Assurance Math** as an optional, off-by-default independent verification layer for Good pages. The default **Math-heavy only** policy uses deterministic notation signals to decide which otherwise-Good pages receive one fresh Secondary re-read. **Any detected math** and **All Good pages** policies are also available. The verifier reads the original image without being shown the Primary transcription. Agreement is preserved as verification evidence; disagreement keeps the Primary text, stores the Secondary reading, and moves the page to Review with no automatic winner. High Assurance disagreement does not continue into Auto-fix.
 
 ## Current capabilities
 
@@ -33,6 +33,7 @@ Post-Release-C hardening makes math returns **LaTeX-safe**. The preferred extern
 - guided human review, anchored flags, and keyboard workflow
 - document/notebook organization, metadata, page ordering, and page-number suggestions
 - optional bounded automatic Primary/Secondary routing
+- optional High Assurance verification of otherwise-Good pages with deterministic math triggers, independent Secondary re-read, visible added usage/cost, and disagreement → Review
 - targeted equation/region crop retries and model-disagreement review
 - versioned project Save/Open
 - project archive ZIP, page/region review-package ZIPs, and external-AI round-trip review packages
@@ -65,6 +66,7 @@ The browser suite must exercise the real standalone page, not only parse its Jav
 - Gemini authentication via the `x-goog-api-key` header rather than the request URL
 - Good-page spot-check persistence and human-found error handling
 - external-AI package contract, tolerant import parsing, mandatory diff, accept/reject behavior, and Approved → Needs Reapproval lineage
+- High Assurance deterministic math triggers, formatting-only normalization, independent agreement, sign-level disagreement, Primary-text preservation, no automatic winner, usage/provenance visibility, and no Auto-fix continuation after disagreement
 
 ## Project docs
 
@@ -83,4 +85,4 @@ A successful provider response must be preserved before any local repair, valida
 
 ## Status
 
-The numbered Upgrade 1–10 roadmap is complete. Current work is hardening, regression coverage, and optional high-accuracy workflows.
+The numbered Upgrade 1–10 roadmap and Releases A–D are complete. **Release E — Infrastructure Hardening** is the next active roadmap milestone.
