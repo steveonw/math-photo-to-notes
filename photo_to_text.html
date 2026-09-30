@@ -2331,6 +2331,10 @@ async function runA2SelfTests(){
  test('reliability summary uses counts, not an accuracy field',!('accuracy' in (reliabilityGroups()[0]||{})));
  const extParsed=parseExternalCorrectionText('Commentary before\n\`\`\`json\n{"package_id":"p1","pages":[{"page_id":"x","corrected_text":"fixed"}]}\n\`\`\`\nCommentary after');
  test('external correction parser tolerates fenced JSON and commentary',extParsed.package_id==='p1'&&extParsed.pages?.[0]?.page_id==='x');
+ const latexBlock=parseExternalCorrectionText('=== PACKAGE p2 ===\n=== PAGE x ===\n$\\frac{1}{2}\\theta \\neq \\sqrt{x}$\n=== NOTE ===\nmath preserved\n=== END ===');
+ test('delimited external format preserves LaTeX backslashes literally',latexBlock.pages?.[0]?.corrected_text==='$\\frac{1}{2}\\theta \\neq \\sqrt{x}$');
+ let unsafeJsonCaught=false;try{parseExternalCorrectionText(String.raw`{"pages":[{"page_id":"x","corrected_text":"$\frac{1}{2}\theta \neq \sqrt{x}$"}]}`)}catch(e){unsafeJsonCaught=/Unsafe LaTeX/.test(String(e?.message||e))}
+ test('unsafe single-backslash LaTeX JSON is rejected instead of silently corrupted',unsafeJsonCaught);
  const oldExports=state.externalReviewExports,oldExternalItems=state.items;
  state.items=[{id:'x',name:'x',classification:'review',status:'done',finalText:'old',text:'old'},{id:'y',name:'y',classification:'review',status:'done',finalText:'old',text:'old'}];
  state.externalReviewExports=[{id:'p1',pageIds:['x','y']}];
@@ -2693,29 +2697,31 @@ function externalReviewPrompt(pkg){
  return `You are reviewing OCR/transcription results against the included source images.
 
 Important rules:
-- Preserve each supplied page_id exactly.
-- Compare the source image to current_text and propose corrected_text only where needed.
+- Preserve each supplied page ID exactly.
+- Compare the source image to the current transcription and propose corrected text only where needed.
 - Preserve wording, structure, and mathematical notation as faithfully as possible.
 - Do not summarize or stylistically rewrite unrelated content.
-- Do not hide uncertainty. If a symbol or passage is genuinely ambiguous, preserve that uncertainty in corrected_text or explain it briefly in note.
+- Do not hide uncertainty. If a symbol or passage is genuinely ambiguous, preserve that uncertainty in the corrected text or explain it briefly in NOTE.
 - Do not invent page IDs.
 - Do not approve pages.
 - Do not assign application classifications, piles, confidence scores, or workflow states.
-- Return JSON only if possible. Commentary or Markdown fences are tolerated by the importer, but unnecessary.
+- IMPORTANT FOR MATH: return the plain delimited format below, NOT JSON. LaTeX backslashes such as \\frac, \\theta, \\neq, \\sqrt, and \\int must be copied literally with no JSON escaping.
 
-Return this shape:
-{
-  "package_id": "${pkg.id}",
-  "pages": [
-    {
-      "page_id": "copy-the-exact-page-id",
-      "corrected_text": "full proposed corrected transcription",
-      "note": "brief explanation of material changes or remaining uncertainty"
-    }
-  ]
-}
+Preferred return format:
 
-Include every page in this package, even if corrected_text is unchanged.
+=== PACKAGE ${pkg.id} ===
+=== PAGE copy-the-exact-page-id ===
+full proposed corrected transcription, with LaTeX backslashes copied literally
+=== NOTE ===
+brief explanation of material changes or remaining uncertainty
+=== END ===
+
+Repeat one PAGE block for every page in the package. NOTE may be blank, but keep the NOTE and END marker lines.
+Do not wrap the response in a Markdown code fence.
+
+JSON is accepted only as a compatibility fallback. If you use JSON, every LaTeX backslash must be JSON-escaped (for example "\\\\frac", not "\\frac"). The importer rejects unsafe JSON math escapes rather than risk silent corruption.
+
+Include every page in this package, even if the corrected text is unchanged.
 Package ID: ${pkg.id}
 Expected page IDs:
 ${pkg.pageIds.map(x=>'- '+x).join('\n')}`;
@@ -2729,10 +2735,12 @@ async function buildExternalReviewPackageEntries(pkg,pages){
    page_count:pages.length,
    instructions:'External AI may propose corrected text only. Application classification and approval remain human/app controlled.'
  };
+ const blockTemplate='=== PACKAGE '+pkg.id+' ===\n'+pages.map(i=>'=== PAGE '+i.id+' ===\n'+(i.finalText||i.text||'')+'\n=== NOTE ===\n\n=== END ===').join('\n\n')+'\n';
  const entries=[
    {name:'review-prompt.txt',bytes:utf8Bytes(externalReviewPrompt(pkg))},
    {name:'manifest.json',bytes:jsonBytes(manifest)},
-   {name:'return-template.json',bytes:jsonBytes({package_id:pkg.id,pages:pages.map(i=>({page_id:i.id,corrected_text:i.finalText||i.text||'',note:''}))})}
+   {name:'return-template.txt',bytes:utf8Bytes(blockTemplate)},
+   {name:'return-template-json-fallback.json',bytes:jsonBytes({package_id:pkg.id,pages:pages.map(i=>({page_id:i.id,corrected_text:i.finalText||i.text||'',note:''}))})}
  ];
  for(let idx=0;idx<pages.length;idx++){
    const i=pages[idx],base='pages/'+String(idx+1).padStart(3,'0')+'-'+safeFilePart(i.id,'page')+'/';
@@ -2764,6 +2772,42 @@ async function exportExternalReviewPackages(pageIds=null){
  if(chunks.length>1)alert('Created '+chunks.length+' external-AI review packages. Your browser may ask permission for multiple downloads.');
  return exported;
 }
+function parseDelimitedExternalCorrections(raw){
+ const text=String(raw||'').replace(/\r\n?/g,'\n');
+ const lines=text.split('\n'),pages=[];let packageId='',sawPage=false;
+ for(let i=0;i<lines.length;){
+   const line=lines[i].trim();
+   const pm=line.match(/^===\s*PACKAGE\s+(.+?)\s*===$/i);
+   if(pm){if(!packageId)packageId=pm[1].trim();i++;continue}
+   const m=line.match(/^===\s*PAGE\s+(.+?)\s*===$/i);
+   if(!m){i++;continue}
+   sawPage=true;const pageId=m[1].trim();i++;
+   const textLines=[];
+   while(i<lines.length&&!/^===\s*(?:NOTE|END)\s*===$/i.test(lines[i].trim())&&!/^===\s*PAGE\s+/i.test(lines[i].trim())){textLines.push(lines[i]);i++}
+   if(i>=lines.length||!/^===\s*NOTE\s*===$/i.test(lines[i].trim()))throw new Error('Delimited external response is missing === NOTE === for page '+pageId+'.');
+   i++;const noteLines=[];
+   while(i<lines.length&&!/^===\s*END\s*===$/i.test(lines[i].trim())&&!/^===\s*PAGE\s+/i.test(lines[i].trim())){noteLines.push(lines[i]);i++}
+   if(i>=lines.length||!/^===\s*END\s*===$/i.test(lines[i].trim()))throw new Error('Delimited external response is missing === END === for page '+pageId+'.');
+   i++;
+   pages.push({page_id:pageId,corrected_text:textLines.join('\n').replace(/^\n+|\n+$/g,''),note:noteLines.join('\n').trim()});
+ }
+ if(!sawPage)return null;
+ return {package_id:packageId,pages,_format:'delimited'};
+}
+const LATEX_JSON_COMMANDS=['frac','dfrac','tfrac','sqrt','theta','beta','alpha','gamma','delta','epsilon','lambda','mu','pi','sigma','phi','psi','omega','neq','leq','geq','approx','times','cdot','pm','mp','int','iint','iiint','sum','prod','lim','partial','nabla','infty','sin','cos','tan','log','ln','exp','begin','end','left','right','text','mathrm','mathbf','mathbb','mathcal','overline','underline','vec','hat','bar'];
+function unsafeLatexJsonEscapes(candidate){
+ const s=String(candidate||''),hits=[];
+ for(let i=0;i<s.length;i++){
+   if(s[i]!=='\\')continue;
+   let n=1;while(i+n<s.length&&s[i+n]==='\\')n++;
+   if(n%2===0){i+=n-1;continue}
+   const tail=s.slice(i+n);
+   const cmd=LATEX_JSON_COMMANDS.find(name=>tail.toLowerCase().startsWith(name.toLowerCase()));
+   if(cmd)hits.push('\\'+cmd);
+   i+=n-1;
+ }
+ return [...new Set(hits)];
+}
 function extractBalancedJson(text,start){
  const open=text[start],close=open==='{'?'}':']';if(open!=='{'&&open!=='[')return '';
  let depth=0,inString=false,escapeNext=false;
@@ -2781,19 +2825,28 @@ function extractBalancedJson(text,start){
  }
  return '';
 }
+function parseJsonExternalCandidate(candidate){
+ const unsafe=unsafeLatexJsonEscapes(candidate);
+ if(unsafe.length)throw new Error('Unsafe LaTeX backslash escaping detected in JSON ('+unsafe.slice(0,5).join(', ')+'). Use the plain === PAGE ... === return format, or double every LaTeX backslash in JSON.');
+ return JSON.parse(candidate);
+}
 function parseExternalCorrectionText(raw){
  const text=String(raw||'').trim();if(!text)throw new Error('The imported response is empty.');
+ const delimited=parseDelimitedExternalCorrections(text);if(delimited)return delimited;
  const candidates=[text];
  const fence=/```(?:json)?\s*([\s\S]*?)```/gi;let m;while((m=fence.exec(text)))candidates.unshift(m[1].trim());
- for(const candidate of candidates){try{return JSON.parse(candidate)}catch(e){}}
+ let unsafeError=null;
+ for(const candidate of candidates){try{return parseJsonExternalCandidate(candidate)}catch(e){if(/Unsafe LaTeX/.test(String(e?.message||e)))unsafeError=e}}
  for(let i=0;i<text.length;i++){
    if(text[i]!=='{'&&text[i]!=='[')continue;
    const candidate=extractBalancedJson(text,i);if(!candidate)continue;
-   try{return JSON.parse(candidate)}catch(e){}
+   try{return parseJsonExternalCandidate(candidate)}catch(e){if(/Unsafe LaTeX/.test(String(e?.message||e)))unsafeError=e}
  }
- throw new Error('No valid JSON object or array was found. Ask the external AI to return the supplied JSON format.');
+ if(unsafeError)throw unsafeError;
+ throw new Error('No valid external correction format was found. Prefer the supplied plain === PAGE ... === format; JSON is only a fallback.');
 }
 function normalizeExternalCorrectionPayload(parsed,sourceName='external-ai-response'){
+ const importFormat=parsed?._format||'json';
  const packageId=String((parsed&& !Array.isArray(parsed)?(parsed.package_id??parsed.packageId):'')||'').trim();
  const rows=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.pages)?parsed.pages:(Array.isArray(parsed?.corrections)?parsed.corrections:[]));
  if(!Array.isArray(rows))throw new Error('The response does not contain a pages array.');
@@ -2812,7 +2865,7 @@ function normalizeExternalCorrectionPayload(parsed,sourceName='external-ai-respo
    matchedIds.add(pageId);report.matched++;
    proposals.push({
      id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+index+'-'+Math.random(),
-     packageId,pageId,sourceName,importedAt:new Date().toISOString(),
+     packageId,pageId,sourceName,importFormat,importedAt:new Date().toISOString(),
      correctedText:String(corrected),editedText:String(corrected),note:String(row.note||''),
      currentTextAtImport:page.finalText||page.text||'',classificationAtImport:page.classification,
      status:'pending',editing:false
@@ -2926,7 +2979,7 @@ async function acceptExternalProposal(){
  }
  const acceptedHash=await sha256Hex(repaired.text);
  page.externalCorrections=page.externalCorrections||[];
- page.externalCorrections.push({id:proposal.id,packageId:proposal.packageId||'',sourceName:proposal.sourceName||'',importedAt:proposal.importedAt,decidedAt:new Date().toISOString(),decision:'accepted',note:proposal.note||'',proposedText:proposal.correctedText,acceptedText:repaired.text,previousFinalHash:beforeHash,acceptedFinalHash:acceptedHash});
+ page.externalCorrections.push({id:proposal.id,packageId:proposal.packageId||'',sourceName:proposal.sourceName||'',importFormat:proposal.importFormat||'',importedAt:proposal.importedAt,decidedAt:new Date().toISOString(),decision:'accepted',note:proposal.note||'',proposedText:proposal.correctedText,acceptedText:repaired.text,previousFinalHash:beforeHash,acceptedFinalHash:acceptedHash});
  if(page.externalCorrections.length>100)page.externalCorrections.shift();
  proposal.editedText=proposed;proposal.status='accepted';proposal.decidedAt=new Date().toISOString();session.index++;
  scheduleAutosave();render();
@@ -2936,7 +2989,7 @@ async function rejectExternalProposal(){
  const page=state.items.find(x=>x.id===proposal.pageId);
  if(page){
    page.externalCorrections=page.externalCorrections||[];
-   page.externalCorrections.push({id:proposal.id,packageId:proposal.packageId||'',sourceName:proposal.sourceName||'',importedAt:proposal.importedAt,decidedAt:new Date().toISOString(),decision:'rejected',note:proposal.note||'',proposedText:proposal.correctedText,currentFinalHash:await sha256Hex(page.finalText||page.text||'')});
+   page.externalCorrections.push({id:proposal.id,packageId:proposal.packageId||'',sourceName:proposal.sourceName||'',importFormat:proposal.importFormat||'',importedAt:proposal.importedAt,decidedAt:new Date().toISOString(),decision:'rejected',note:proposal.note||'',proposedText:proposal.correctedText,currentFinalHash:await sha256Hex(page.finalText||page.text||'')});
    if(page.externalCorrections.length>100)page.externalCorrections.shift();
  }
  proposal.status='rejected';proposal.decidedAt=new Date().toISOString();session.index++;
