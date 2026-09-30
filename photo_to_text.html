@@ -2114,9 +2114,56 @@ document.addEventListener('keydown',e=>{
  else if(e.key==='2'){e.preventDefault();window.runSingleSecondaryById(i.id)}
 });
 
-function download(name,content){
- const blob=new Blob([content],{type:'text/plain;charset=utf-8'}),u=URL.createObjectURL(blob),a=document.createElement('a');
- a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(u);
+function downloadBlob(name,blob){
+ const u=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000);
+}
+function download(name,content,type='text/plain;charset=utf-8'){downloadBlob(name,new Blob([content],{type}))}
+function utf8Bytes(s){return new TextEncoder().encode(String(s??''))}
+function dataUrlBytes(dataUrl){
+ const parts=String(dataUrl||'').split(','),meta=parts[0]||'',payload=parts[1]||'';
+ const mime=(meta.match(/data:([^;]+)/)||[])[1]||'application/octet-stream';
+ let bytes;
+ if(/;base64/i.test(meta)){
+   const raw=atob(payload);bytes=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
+ }else bytes=utf8Bytes(decodeURIComponent(payload));
+ return {bytes,mime};
+}
+function crc32(bytes){
+ let crc=0xffffffff;
+ for(let i=0;i<bytes.length;i++){
+   crc^=bytes[i];
+   for(let j=0;j<8;j++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);
+ }
+ return (crc^0xffffffff)>>>0;
+}
+function u16(n){return new Uint8Array([n&255,(n>>>8)&255])}
+function u32(n){return new Uint8Array([n&255,(n>>>8)&255,(n>>>16)&255,(n>>>24)&255])}
+function concatBytes(parts){
+ const len=parts.reduce((n,p)=>n+p.length,0),out=new Uint8Array(len);let off=0;
+ for(const p of parts){out.set(p,off);off+=p.length}return out;
+}
+function dosDateTime(date=new Date()){
+ const y=Math.max(1980,date.getFullYear()),time=(date.getHours()<<11)|(date.getMinutes()<<5)|(date.getSeconds()>>1);
+ const day=((y-1980)<<9)|((date.getMonth()+1)<<5)|date.getDate();return {time,day};
+}
+function buildStoreZip(entries){
+ const locals=[],centrals=[];let offset=0;
+ for(const entry of entries){
+   const name=utf8Bytes(entry.name.replace(/^\/+/,'')),data=entry.bytes instanceof Uint8Array?entry.bytes:utf8Bytes(entry.bytes),crc=crc32(data),dt=dosDateTime(entry.date||new Date());
+   const local=concatBytes([u32(0x04034b50),u16(20),u16(0x0800),u16(0),u16(dt.time),u16(dt.day),u32(crc),u32(data.length),u32(data.length),u16(name.length),u16(0),name,data]);
+   locals.push(local);
+   const central=concatBytes([u32(0x02014b50),u16(20),u16(20),u16(0x0800),u16(0),u16(dt.time),u16(dt.day),u32(crc),u32(data.length),u32(data.length),u16(name.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset),name]);
+   centrals.push(central);offset+=local.length;
+ }
+ const centralBlob=concatBytes(centrals),end=concatBytes([u32(0x06054b50),u16(0),u16(0),u16(entries.length),u16(entries.length),u32(centralBlob.length),u32(offset),u16(0)]);
+ return new Blob([...locals,centralBlob,end],{type:'application/zip'});
+}
+function safeFilePart(s,fallback='item'){return String(s||fallback).replace(/[\\/:*?"<>|\x00-\x1f]+/g,'-').replace(/\s+/g,' ').trim().slice(0,100)||fallback}
+async function itemImageData(i){
+ if(i.imageData)return i.imageData;
+ if(i.file)try{return await dataURL(i.file)}catch(e){}
+ return '';
 }
 function mdFor(list){
  return list.map((i,n)=>{
@@ -2135,6 +2182,70 @@ function mdFor(list){
    return '# '+(m.title||i.name)+'\n\n'+meta+'\n\n'+(i.text||'');
  }).join('\n\n---\n\n')
 }
+function plainTextFor(list){
+ return list.map(i=>{
+   const m=i.metadata||{},head=[m.title||i.name,'Document: '+documentName(i.documentId),m.pageNumber?'Page: '+m.pageNumber:'','Status: '+i.classification].filter(Boolean).join('\n');
+   return head+'\n\n'+(i.finalText||i.text||'');
+ }).join('\n\n'+'='.repeat(72)+'\n\n');
+}
+function texEscapeProse(s){
+ return String(s||'').replace(/\\/g,'\\textbackslash{}').replace(/([&#%_{}])/g,'\\$1').replace(/\^/g,'\\textasciicircum{}').replace(/~/g,'\\textasciitilde{}');
+}
+function texPreserveMath(s){
+ const t=String(s||''),segs=mathSegments(t);if(!segs.length)return texEscapeProse(t).replace(/\n/g,'\n\n');
+ let out='',pos=0;
+ for(const seg of segs){if(seg.start<pos)continue;out+=texEscapeProse(t.slice(pos,seg.start));out+=seg.text;pos=seg.end}
+ out+=texEscapeProse(t.slice(pos));return out.replace(/\n/g,'\n\n');
+}
+function texFor(list,title='Math Photo to Notes'){
+ const body=list.filter(i=>i.text).map(i=>{
+   const m=i.metadata||{},name=texEscapeProse(m.title||i.name),meta=texEscapeProse('Document: '+documentName(i.documentId)+(m.pageNumber?' | Page: '+m.pageNumber:'')+' | Status: '+i.classification);
+   return '\\section*{'+name+'}\n\\textit{'+meta+'}\n\n'+texPreserveMath(i.finalText||i.text||'');
+ }).join('\n\n\\newpage\n\n');
+ return '\\documentclass[11pt]{article}\n\\usepackage[margin=1in]{geometry}\n\\usepackage{amsmath,amssymb}\n\\usepackage[T1]{fontenc}\n\\title{'+texEscapeProse(title)+'}\n\\date{}\n\\begin{document}\n\\maketitle\n'+body+'\n\\end{document}\n';
+}
+function sanitizedPageRecord(i,includeImages=false){
+ const x=serializableItem(i,includeImages);
+ delete x.runningPasses;delete x.cropDataUrl;
+ return x;
+}
+function auditManifest(list=state.items){
+ return {
+   schema:'math-photo-notes-audit-v1',generatedAt:new Date().toISOString(),projectSchema:PROJECT_SCHEMA,
+   pageCount:list.length,documentCount:state.documents.length,
+   pages:list.map(i=>({
+     id:i.id,name:i.name,documentId:i.documentId||'',documentName:documentName(i.documentId),order:i.order,
+     classification:i.classification,status:i.status,imageHash:i.imageHash||'',lastFingerprint:i.lastFingerprint||'',
+     provider:i.lastProvider||'',model:i.lastModel||'',pass:i.lastPass||'',approvalAt:i.approvalAt||'',
+     needsReapproval:!!i.needsReapproval,needsRefresh:!!i.needsRefresh,
+     revisionCount:i.history?.length||0,reviewFlagCount:i.reviewFlags?.length||0,routingEventCount:i.routingHistory?.length||0,
+     regions:(i.regions||[]).map(r=>({id:r.id,note:r.note||'',cropHash:r.cropHash||'',anchor:r.anchor||null,preferredResultId:r.preferredResultId||'',appliedResultId:r.appliedResultId||'',disagreement:!!r.disagreement,needsRefresh:!!r.needsRefresh,resultCount:r.results?.length||0,eventCount:r.events?.length||0}))
+   }))
+ };
+}
+
+async function exportProjectJson(){
+ await saveProjectState();
+ const payload=projectEnvelope(true);
+ download('math-photo-notes-project-'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify(payload,null,2),'application/json;charset=utf-8');
+}
+async function importProjectFile(file){
+ if(!file)return;
+ if(state.running||state.activeControllers.size||state.queuePlan){alert('Finish or cancel active processing before opening another project.');return}
+ let parsed;
+ try{parsed=JSON.parse(await file.text());validateProjectEnvelope(parsed)}catch(e){alert('Could not open project: '+(e instanceof Error?e.message:String(e)));return}
+ if(state.items.length&&!confirm('Replace the current project with "'+file.name+'"?'))return;
+ state.items.forEach(i=>{if(i.url&&i.url.startsWith('blob:'))URL.revokeObjectURL(i.url)});
+ hydrateSavedItems(parsed);await idbPut(DB_PROJECTS,'current',projectEnvelope(true));try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(projectEnvelope(false)))}catch(e){}
+ const active=document.querySelector('#tabs button[data-filter="'+state.filter+'"]');if(active)document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===active));
+ render();alert('Project opened: '+state.items.length+' page'+(state.items.length===1?'':'s')+'. API keys were not imported and must be entered separately.');
+}
+$('save-project').onclick=()=>exportProjectJson();
+$('open-project').onclick=()=>$('open-project-file').click();
+$('open-project-file').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)importProjectFile(file)};
+$('download-txt').onclick=()=>download('photo-to-text-all.txt',plainTextFor(state.items.filter(i=>i.text)));
+$('download-tex').onclick=()=>download('photo-to-text-all.tex',texFor(state.items.filter(i=>i.text)),'application/x-tex;charset=utf-8');
+
 $('download-all').onclick=()=>download('photo-to-text-all.md',mdFor(state.items.filter(i=>i.text)));
 $('download-review').onclick=()=>download('photo-to-text-review.md',mdFor(state.items.filter(i=>i.classification==='review')));
 $('download-unclear').onclick=()=>download('photo-to-text-unclear.md',mdFor(state.items.filter(i=>i.classification==='unclear')));
