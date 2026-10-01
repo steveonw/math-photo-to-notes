@@ -1868,3 +1868,42 @@ then:
 `Approved → Export / Archive`
 
 The system should remain conservative, provenance-first, and human-controlled.
+
+---
+
+# 16. MathJax Renderer Unification Maintenance Plan
+
+This plan is a product-maintenance refinement after Releases A–E, not a new Release F.
+
+## Architecture decision: one source, two builds
+
+Maintain one application source:
+
+`photo_to_text.html`
+
+From that source, support two runnable editions:
+
+- **normal build** — loads the pinned local MathJax renderer from `vendor/`
+- **offline build** — `make_offline_build.py` injects that same pinned renderer into `photo_to_text_OFFLINE.html`
+
+The two editions must share all application logic. The offline build is a packaging transformation, not a second program.
+
+## Renderer-hardening steps
+
+- [x] **Step 1 — SVG parity.** Switch the normal live-preview and PDF/print paths from CHTML to pinned MathJax 3.2.2 `tex-svg.js`, matching the existing offline renderer. Keep legacy CHTML files temporarily until cleanup.
+- [ ] **Step 2 — Broader self-contained math surface.** Evaluate and, if regression-tested, move Photo to Notes to pinned MathJax 3.2.2 `tex-svg-full.js` for both normal and offline builds.
+- [ ] **Step 3 — Render errors as evidence.** Harden MathJax error-node/error handling so malformed AI TeX preserves transcription evidence and moves the page toward review without inventing a correction.
+- [ ] **Step 4 — Renderer parity corpus.** Add normal/offline browser fixtures for ordinary math, matrices/structures, extension-heavy commands such as `\\cancel`, and intentionally malformed TeX.
+- [ ] **Step 5 — Remove renderer drift.** Assert that normal preview, offline preview, and PDF/print use the same pinned MathJax version/output policy and do not request remote executable MathJax.
+- [ ] **Step 6 — Cleanup.** Remove obsolete CHTML-specific assets/configuration only after the SVG paths and regression corpus are green.
+
+## Step 1 acceptance criteria
+
+- normal live preview renders through SVG
+- normal PDF/print renders through SVG
+- offline continues to embed and render the same pinned `tex-svg.js`
+- the normal build requests the local `vendor/mathjax/tex-svg.js`, not CHTML output/webfonts
+- no remote executable MathJax is required
+- existing transcription, provenance, review, and failure-preservation behavior is unchanged
+- both normal and generated offline editions pass the browser smoke suite
+

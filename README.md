@@ -22,7 +22,7 @@ Post-Release-C hardening makes math returns **LaTeX-safe**. The preferred extern
 
 Release D activates **High Assurance Math** as an optional, off-by-default independent verification layer for Good pages. The default **Math-heavy only** policy uses deterministic notation signals to decide which otherwise-Good pages receive one fresh Secondary re-read. **Any detected math** and **All Good pages** policies are also available. The verifier reads the original image without being shown the Primary transcription. Agreement is preserved as verification evidence; disagreement keeps the Primary text, stores the Secondary reading, and moves the page to Review with no automatic winner. High Assurance disagreement does not continue into Auto-fix.
 
-Release E hardens the infrastructure underneath that workflow: targeted-region work is durably resumable, project files use explicit v1→v2 migrations, browser regressions have a checked-in fixture corpus, large archives have a compressed/memory-aware path, and image-review assistance remains evidence-driven and non-destructive. MathJax is fully local in the normal app, and the repo now also supports an EquationWright-style **single-file offline build** with pinned MathJax 3.2.2 `tex-svg.js`.
+Release E hardens the infrastructure underneath that workflow: targeted-region work is durably resumable, project files use explicit v1→v2 migrations, browser regressions have a checked-in fixture corpus, large archives have a compressed/memory-aware path, and image-review assistance remains evidence-driven and non-destructive. MathJax now uses pinned 3.2.2 SVG rendering in both editions: the normal app loads the local `vendor/mathjax/tex-svg.js` bundle, while the EquationWright-style **single-file offline build** embeds that same bundle inline.
 
 ## Current capabilities
 
@@ -31,7 +31,7 @@ Release E hardens the infrastructure underneath that workflow: targeted-region w
 - Good / Review / Unclear / Math Unsure / Approved / Needs Reapproval / Needs Refresh / Failed / Interrupted states
 - raw / repaired / final transcription lineage and revision history
 - conservative LaTeX repair plus deterministic validation
-- fully local MathJax live review and PDF export
+- fully local pinned MathJax 3.2.2 SVG live review and PDF export
 - reproducible one-file offline build with embedded pinned MathJax tex-svg
 - guided human review, anchored flags, and keyboard workflow
 - document/notebook organization, metadata, page ordering, and page-number suggestions
@@ -90,7 +90,7 @@ The browser suite must exercise the real standalone page, not only parse its Jav
 - external-AI package contract, tolerant import parsing, mandatory diff, accept/reject behavior, and Approved → Needs Reapproval lineage
 - High Assurance deterministic math triggers, formatting-only normalization, independent agreement, sign-level disagreement, Primary-text preservation, no automatic winner, usage/provenance visibility, and no Auto-fix continuation after disagreement
 - durable targeted-region/migration fixture behavior, archive hardening, and image-review-assist evidence gates
-- local MathJax startup/components/webfonts with no remote executable script
+- local pinned MathJax `tex-svg.js` rendering with no remote executable script
 - generated one-file offline `tex-svg` edition through the same full Chromium smoke suite
 
 ## Project docs

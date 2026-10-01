@@ -1691,27 +1691,20 @@ function ensureMathJax(){
  if(mathJaxLoadPromise)return mathJaxLoadPromise;
  const dollar=String.fromCharCode(36);
  window.MathJax={
-   loader:{load:['input/tex','output/chtml','[tex]/ams','[tex]/newcommand','[tex]/noundefined']},
-   tex:{
-     inlineMath:[['\\(','\\)'],[dollar,dollar]],
-     displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],
-     processEscapes:true,
-     packages:{'[+]':['ams','newcommand','noundefined']}
-   },
-   chtml:{
-     fontURL:'./vendor/mathjax/output/chtml/fonts/woff-v2'
-   },
+   tex:{inlineMath:[['\\(','\\)'],[dollar,dollar]],displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true},
+   svg:{fontCache:'global'},
    options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
  };
+
  mathJaxLoadPromise=new Promise((resolve,reject)=>{
    const node=document.createElement('script');
-   node.src='./vendor/mathjax/startup.js';
+   node.src='./vendor/mathjax/tex-svg.js';
    node.async=true;
    node.onload=()=>{
      const ready=window.MathJax?.startup?.promise;
      Promise.resolve(ready).then(()=>resolve(window.MathJax)).catch(reject);
    };
-   node.onerror=()=>reject(new Error('Local MathJax runtime could not be loaded.'));
+   node.onerror=()=>reject(new Error('Local MathJax SVG runtime could not be loaded.'));
    document.head.appendChild(node);
  });
  return mathJaxLoadPromise;
@@ -3536,23 +3529,17 @@ function exportPdfPile(list,title){
    <div class="transcription">${textToPrintableHTML(i.text)}</div>
  </section>`).join('');
 
- const mathJaxStartupURL=new URL('./vendor/mathjax/startup.js',location.href).href;
- const mathJaxFontURL=new URL('./vendor/mathjax/output/chtml/fonts/woff-v2',location.href).href;
+ const mathJaxBundleURL=new URL('./vendor/mathjax/tex-svg.js',location.href).href;
  const embeddedMathJaxSource=document.getElementById('embedded-mathjax-source')?.textContent||'';
  const embeddedSafe=embeddedMathJaxSource.replace(/<\/script/gi,'<\\\\/script');
  const dollar='$';
- const printMathJaxConfig=embeddedMathJaxSource?{
+ const printMathJaxConfig={
    tex:{inlineMath:[['\\(','\\)'],[dollar,dollar]],displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true},
    svg:{fontCache:'global'},
    options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
- }:{
-   loader:{load:['input/tex','output/chtml','[tex]/ams','[tex]/newcommand','[tex]/noundefined']},
-   tex:{inlineMath:[['\\(','\\)'],[dollar,dollar]],displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true,packages:{'[+]':['ams','newcommand','noundefined']}},
-   chtml:{fontURL:mathJaxFontURL},
-   options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
  };
  const configScript='<script>window.MathJax='+JSON.stringify(printMathJaxConfig).replace(/</g,'\\u003c')+';<\\/script>';
- const engineScript=embeddedMathJaxSource?'<script>'+embeddedSafe+'<\\/script>':'<script defer src="'+htmlEscape(mathJaxStartupURL)+'"><\\/script>';
+ const engineScript=embeddedMathJaxSource?'<script>'+embeddedSafe+'<\\/script>':'<script defer src="'+htmlEscape(mathJaxBundleURL)+'"><\\/script>';
  const mathJaxMarkup=configScript+'\\n'+engineScript;
  const w=window.open('','_blank');
  if(!w){alert('The browser blocked the PDF window. Allow pop-ups for this file and try again.');return}

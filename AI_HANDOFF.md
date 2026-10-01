@@ -1494,6 +1494,37 @@ See `UPGRADE_PLAN.md` for the full release plan and acceptance criteria.
 
 ---
 
+
+# MathJax Renderer Unification — Maintenance Plan
+
+This is a maintenance/refinement plan, not a new numbered release.
+
+## One source, two builds
+
+The application has **one source program**:
+
+`photo_to_text.html`
+
+It produces two runnable editions:
+
+- the normal edition, which loads the pinned local MathJax renderer from `vendor/`
+- `photo_to_text_OFFLINE.html`, generated from that same source and embedding the same pinned renderer inline
+
+These are two builds of one application, not two independently maintained programs. Transcription, queue, review, persistence, export, and UI logic must remain shared. The offline builder may change packaging, but it must not fork application behavior.
+
+## Renderer unification plan
+
+1. **SVG parity** — use pinned MathJax 3.2.2 SVG rendering in the normal live-preview and PDF/print paths as well as the offline build.
+2. **Broader handwritten-math bundle** — evaluate/upgrade Photo to Notes to pinned `tex-svg-full.js` so expected AI/handwriting extension commands do not depend on runtime autoload fetches.
+3. **Render-error evidence** — keep MathJax failures non-destructive: preserve source/final text, record the render warning, and route uncertain math to human review rather than guessing a correction.
+4. **Renderer-parity fixtures** — exercise representative ordinary math, extension-heavy math, and deliberately malformed TeX in both normal and offline browser tests.
+5. **Cleanup** — after parity is proven, remove obsolete CHTML-specific configuration/assets and update documentation so there is only one renderer policy to maintain.
+
+### Step 1 status
+
+Step 1 switches the regular edition from the local CHTML component/webfont path to the same pinned MathJax 3.2.2 `tex-svg.js` bundle used by the offline build. PDF/print also uses SVG. The old CHTML vendor files are intentionally left in place until the later cleanup step.
+
+
 # Desired Long-Term Workflow
 
 `Import → organize → fingerprint → Primary AI/cache → classify → safe repair/validate → targeted retry → guided human review → Approved → export/archive`
