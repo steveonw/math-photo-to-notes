@@ -3553,8 +3553,9 @@ function exportPdfPile(list,title){
    options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
  };
  const configScript='<script>window.MathJax='+JSON.stringify(printMathJaxConfig).replace(/</g,'\\u003c')+';<\/script>';
- const engineScript=embeddedMathJaxSource?'<script>'+embeddedSafe+'<\/script>':'<script defer src="'+htmlEscape(mathJaxBundleURL)+'"><\/script>';
+ const engineScript=embeddedMathJaxSource?'<script>'+embeddedSafe+'<\/script>':'';
  const mathJaxMarkup=configScript+'\n'+engineScript;
+ const pdfMathJaxUrlLiteral=JSON.stringify(embeddedMathJaxSource?'':mathJaxBundleURL).replace(/</g,'\\u003c');
  const w=window.open('','_blank');
  if(!w){alert('The browser blocked the PDF window. Allow pop-ups for this file and try again.');return}
  try{w.opener=null}catch(e){}
@@ -3588,10 +3589,15 @@ function exportPdfPile(list,title){
  <script>
  (async function(){
    try{
-     // In the normal build the renderer is a deferred local script. Yield until it
-     // has installed the real startup/typeset API; the offline build is already ready.
-     for(let n=0;n<200&&typeof window.MathJax?.typesetPromise!=='function';n++){
-       await new Promise(resolve=>setTimeout(resolve,25));
+     const rendererURL=${pdfMathJaxUrlLiteral};
+     if(typeof window.MathJax?.typesetPromise!=='function'&&rendererURL){
+       await new Promise((resolve,reject)=>{
+         const node=document.createElement('script');
+         node.src=rendererURL;
+         node.onload=resolve;
+         node.onerror=()=>reject(new Error('Local MathJax PDF renderer could not be loaded.'));
+         document.head.appendChild(node);
+       });
      }
      if(window.MathJax && MathJax.startup && MathJax.startup.promise){
        await MathJax.startup.promise;
