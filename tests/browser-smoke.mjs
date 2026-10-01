@@ -54,7 +54,7 @@ const pngBase64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8
 function assert(ok,message){if(!ok)throw new Error(message)}
 
 const mathJaxBytes=await fs.readFile(path.join(root,'vendor','mathjax','tex-svg-full.js'));
-const mathJaxGitBlobSha=crypto.createHash('sha1').update(Buffer.from('blob '+mathJaxBytes.length+'\\0','binary')).update(mathJaxBytes).digest('hex');
+const mathJaxGitBlobSha=crypto.createHash('sha1').update(Buffer.concat([Buffer.from('blob '+mathJaxBytes.length,'ascii'),Buffer.from([0]),mathJaxBytes])).digest('hex');
 assert(mathJaxGitBlobSha===EXPECTED_MATHJAX_GIT_BLOB_SHA1,'Vendored MathJax blob drifted: '+mathJaxGitBlobSha);
 
 
