@@ -27,11 +27,11 @@ jobs:
       - name: Run browser smoke tests
         run: node tests/browser-smoke.mjs
 
-      - name: Fetch pinned MathJax tex-svg bundle
-        run: python3 scripts/fetch_mathjax.py --output vendor/mathjax/tex-svg.js
+      - name: Fetch pinned MathJax tex-svg-full bundle
+        run: python3 scripts/fetch_mathjax.py --output vendor/mathjax/tex-svg-full.js
 
       - name: Build single-file offline edition
-        run: python3 make_offline_build.py photo_to_text.html vendor/mathjax/tex-svg.js --output photo_to_text_OFFLINE.html
+        run: python3 make_offline_build.py photo_to_text.html vendor/mathjax/tex-svg-full.js --output photo_to_text_OFFLINE.html
 
       - name: Run browser smoke tests against offline edition
         run: APP_FILE=photo_to_text_OFFLINE.html node tests/browser-smoke.mjs
