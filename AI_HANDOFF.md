@@ -1324,7 +1324,7 @@ The default user story is:
 - explicit project v1 → v2 migrations and migration history
 - checked-in deterministic browser regression fixture corpus
 - regular browser MathJax is fully self-hosted from `vendor/mathjax`; the original CHTML/startup layout was later superseded by the single pinned `tex-svg-full.js` bundle
-- rendered-browser gate now verifies the pinned SVG bundle, renderer corpus, popup/PDF parity, and zero remote executable MathJax
+- rendered-browser gate now verifies the pinned SVG bundle, renderer corpus, shared-runtime PDF/print parity, and zero remote executable MathJax
 - PDF/print MathJax uses the same pinned SVG policy
 - EquationWright-inspired one-file offline packaging, now using pinned MathJax 3.2.2 `tex-svg-full.js`
 - fetch helper verifies exact Git blob SHA-1 before building
@@ -1387,8 +1387,8 @@ CI runs the same corpus against:
 The browser gate also:
 
 - verifies the exact vendored MathJax Git blob SHA
-- captures MathJax requests from the main page and popups
-- opens the actual PDF/print popup and waits for SVG output
+- audits MathJax requests from the main page and verifies PDF/print does not create a second renderer load
+- exercises the actual print-staging path, verifies SVG is present when `window.print()` is invoked, and checks cleanup afterward
 - verifies live and PDF package policy remains aligned
 - allows the normal edition to request only local `tex-svg-full.js`
 - requires the offline edition to make zero companion MathJax requests
@@ -1535,7 +1535,7 @@ Application behavior stays shared; the offline builder changes packaging only.
 2. **Broader handwritten-math bundle** — all paths use pinned MathJax 3.2.2 `tex-svg-full.js`.
 3. **Render-error evidence / untrusted TeX** — `merror` nodes are surfaced, source text is preserved, and `html`, `noundefined`, and `require` are disabled.
 4. **Renderer corpus** — checked-in fixtures cover ordinary math, matrices/cases/alignment, extension-heavy notation, malformed/undefined TeX, and unsafe TeX attempts in both editions.
-5. **Renderer-drift gate** — exact bundle identity, live-preview policy, actual PDF/print SVG rendering, request behavior, and offline embedding are regression-tested.
+5. **Renderer-drift gate** — exact bundle identity, live-preview policy, same-document PDF/print SVG rendering, request behavior, cleanup, and offline embedding are regression-tested. The print path deliberately reuses the already-loaded live MathJax runtime rather than loading MathJax again in a popup.
 6. **Cleanup** — obsolete CHTML/startup/component assets and the old `tex-svg.js` bundle are removed.
 
 The MathJax maintenance work should now be treated as regression-protected infrastructure rather than an open migration.
