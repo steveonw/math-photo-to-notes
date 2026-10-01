@@ -8,7 +8,7 @@ on:
 jobs:
   browser-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -26,3 +26,12 @@ jobs:
 
       - name: Run browser smoke tests
         run: node tests/browser-smoke.mjs
+
+      - name: Fetch pinned MathJax tex-svg bundle
+        run: python3 scripts/fetch_mathjax.py --output vendor/mathjax/tex-svg.js
+
+      - name: Build single-file offline edition
+        run: python3 make_offline_build.py photo_to_text.html vendor/mathjax/tex-svg.js --output photo_to_text_OFFLINE.html
+
+      - name: Run browser smoke tests against offline edition
+        run: APP_FILE=photo_to_text_OFFLINE.html node tests/browser-smoke.mjs
