@@ -3558,7 +3558,6 @@ function exportPdfPile(list,title){
  const pdfMathJaxUrlLiteral=JSON.stringify(embeddedMathJaxSource?'':mathJaxBundleURL).replace(/</g,'\\u003c');
  const w=window.open('','_blank');
  if(!w){alert('The browser blocked the PDF window. Allow pop-ups for this file and try again.');return}
- try{w.opener=null}catch(e){}
  w.document.open();
  w.document.write(`<!doctype html>
  <html><head><meta charset="utf-8">
@@ -3610,6 +3609,7 @@ function exportPdfPile(list,title){
    }catch(e){
      console.error('MathJax PDF render failed',e);
    }
+   try{window.opener=null}catch(e){}
    setTimeout(()=>window.print(),250);
  })();
  <\/script>
