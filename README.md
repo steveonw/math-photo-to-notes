@@ -93,7 +93,7 @@ The browser suite must exercise the real standalone page, not only parse its Jav
 - durable targeted-region/migration fixture behavior, archive hardening, and image-review-assist evidence gates
 - local pinned MathJax `tex-svg-full.js` rendering with no remote executable script
 - checked-in renderer corpus for ordinary math, matrices/cases/alignment, bundled extensions, malformed/undefined TeX, and unsafe TeX attempts
-- actual PDF/print popup SVG parity, pinned-bundle identity, blocked-package policy, and normal/offline request auditing
+- actual PDF/print staging SVG parity using the already-loaded live MathJax runtime, plus pinned-bundle identity, blocked-package policy, cleanup, and normal/offline request auditing
 - generated one-file offline `tex-svg-full` edition through the same full Chromium smoke suite
 
 ## Project docs
