@@ -3,12 +3,14 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
 const root=path.resolve(here,'..');
 const regressionFixtures=JSON.parse(await fs.readFile(path.join(here,'fixtures','browser-regressions.json'),'utf8'));
 const host='127.0.0.1';
 const port=4173;
+const EXPECTED_MATHJAX_GIT_BLOB_SHA1='b3388d20a8d2773b001eebd3211ef1a337335d67';
 
 const types={
   '.html':'text/html; charset=utf-8',
@@ -51,18 +53,24 @@ const pngBase64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8
 
 function assert(ok,message){if(!ok)throw new Error(message)}
 
+const mathJaxBytes=await fs.readFile(path.join(root,'vendor','mathjax','tex-svg-full.js'));
+const mathJaxGitBlobSha=crypto.createHash('sha1').update(Buffer.from('blob '+mathJaxBytes.length+'\\0','binary')).update(mathJaxBytes).digest('hex');
+assert(mathJaxGitBlobSha===EXPECTED_MATHJAX_GIT_BLOB_SHA1,'Vendored MathJax blob drifted: '+mathJaxGitBlobSha);
+
+
 async function newPage(){
   const context=await browser.newContext();
-  const page=await context.newPage();
+  await context.addInitScript(()=>{window.print=()=>{window.__mathPhotoPrintCalled=true}});
   const remoteMathJaxScripts=[];
   const localMathJaxRequests=[];
-  page.on('request',request=>{
+  context.on('request',request=>{
     const url=request.url();
     if(url.includes('/vendor/mathjax/'))localMathJaxRequests.push(url);
     if(url.includes('cdn.jsdelivr.net')&&/\.js(?:$|\?)/.test(url))remoteMathJaxScripts.push(url);
   });
+  const page=await context.newPage();
 
-  await page.route('https://cdn.jsdelivr.net/**/tex-mml-chtml.js',route=>route.fulfill({
+  await context.route('https://cdn.jsdelivr.net/**/tex-mml-chtml.js',route=>route.fulfill({
     status:200,
     contentType:'application/javascript',
     body:'window.MathJax=window.MathJax||{};window.MathJax.typesetPromise=async()=>{};window.MathJax.typesetClear=()=>{};'
@@ -191,95 +199,113 @@ try{
       renderedSvg:!!document.querySelector('.previewpane mjx-container svg')
     }));
     assert(mathJaxSourceAudit.hasRemote===false,'Application source still contains remote MathJax executable URLs');
-    const extensionAudit=await page.evaluate(async()=>{
-      const host=document.createElement('div');
-      host.id='mathjax-full-extension-smoke';
-      host.textContent='$\\cancel{x}$';
-      document.body.appendChild(host);
-      try{
-        if(window.MathJax?.typesetPromise)await window.MathJax.typesetPromise([host]);
-        return {
-          renderedSvg:!!host.querySelector('mjx-container svg'),
-          hasMerror:!!host.querySelector('mjx-merror,[data-mml-node="merror"]'),
-          text:host.textContent||''
-        };
-      }finally{
-        if(window.MathJax?.typesetClear)window.MathJax.typesetClear([host]);
-        host.remove();
-      }
-    });
-    assert(extensionAudit.renderedSvg===true,'tex-svg-full did not render \\cancel through SVG: '+JSON.stringify(extensionAudit));
-    assert(extensionAudit.hasMerror===false,'tex-svg-full produced a MathJax error node for \\cancel: '+JSON.stringify(extensionAudit));
-    assert(!localMathJaxRequests.some(x=>/extensions\/cancel\.js(?:$|\?)/.test(x)),'tex-svg-full unexpectedly fetched the cancel extension separately: '+JSON.stringify(localMathJaxRequests));
-
-    // Untrusted TeX: malformed/unknown commands must become review evidence, and HTML/CSS injection must stay inert.
-    const untrustedAudit=await page.evaluate(async()=>{
-      const out={};
-      const cases={
-        malformedExponent:'$x^$',
-        extraBrace:'$x}$',
-        undefinedMacro:'$\\foo{x}$',
-        jsLink:'$\\href{javascript:alert(1)}{x}$',
-        cssInject:'$\\style{position:fixed;inset:0}{x}$',
-        requireHtml:'$\\require{html}\\href{javascript:alert(1)}{x}$'
-      };
-      for(const [k,tex] of Object.entries(cases)){
-        const id='untrusted-'+k;
+    const rendererAudit=await page.evaluate(async cases=>{
+      const out=[];
+      for(let n=0;n<cases.length;n++){
+        const x=cases[n];
+        const id='renderer-corpus-'+n;
         const el=document.createElement('div');
         el.id='preview-'+id;
         document.body.appendChild(el);
-        state.items.push({id,status:'done',classification:'good',text:tex,finalText:tex,mathRenderWarnings:[]});
-        await renderMathPreview(id,tex);
-        const it=state.items.find(x=>x.id===id);
-        out[k]={
+        state.items.push({id,status:'done',classification:'good',text:x.tex,finalText:x.tex,mathRenderWarnings:[]});
+        await renderMathPreview(id,x.tex);
+        const it=state.items.find(y=>y.id===id);
+        out.push({
+          name:x.name,
+          expect:x.expect,
+          unsafe:!!x.unsafe,
           classification:it.classification,
           warning:(it.mathRenderWarnings||[]).join(' '),
           finalText:it.finalText,
+          renderedSvg:!!el.querySelector('mjx-container svg'),
+          hasMerror:!!el.querySelector('mjx-merror,[data-mml-node="merror"]'),
           jsLink:!!el.querySelector('a[href^="javascript:"],[href^="javascript:"]'),
           fixed:!!el.querySelector('[style*="position:fixed"],[style*="position: fixed"]')
-        };
-        state.items=state.items.filter(x=>x.id!==id);
+        });
+        state.items=state.items.filter(y=>y.id!==id);
         if(window.MathJax?.typesetClear)window.MathJax.typesetClear([el]);
         el.remove();
       }
 
-      // Rendering a historical/raw preview must never mutate the authoritative final-page state.
-      const safeId='untrusted-nonauthoritative';
+      // Historical/raw/repaired previews are informative only; they cannot mutate final-page state.
+      const safeId='renderer-nonauthoritative';
       const safe=document.createElement('div');
       safe.id='preview-'+safeId;
       document.body.appendChild(safe);
       state.items.push({id:safeId,status:'done',classification:'good',text:'$x^2$',finalText:'$x^2$',mathRenderWarnings:[]});
       await renderMathPreview(safeId,'$x^$');
       const safeItem=state.items.find(x=>x.id===safeId);
-      out.nonAuthoritative={classification:safeItem.classification,warnings:safeItem.mathRenderWarnings||[],finalText:safeItem.finalText};
+      const nonAuthoritative={classification:safeItem.classification,warnings:safeItem.mathRenderWarnings||[],finalText:safeItem.finalText};
       state.items=state.items.filter(x=>x.id!==safeId);
       if(window.MathJax?.typesetClear)window.MathJax.typesetClear([safe]);
       safe.remove();
-      return out;
-    });
-    for(const [k,v] of Object.entries(untrustedAudit)){
-      if(k==='nonAuthoritative')continue;
-      assert(v.classification==='mathunsure','Bad/untrusted TeX case '+k+' was not flagged Math Unsure: '+JSON.stringify(v));
-      assert(/TeX error|unrenderable TeX/i.test(v.warning),'Bad/untrusted TeX case '+k+' did not preserve a render warning: '+JSON.stringify(v));
-      assert(!v.jsLink&&!v.fixed,'Untrusted TeX case '+k+' injected a link or fixed style into the page: '+JSON.stringify(v));
-    }
-    assert(untrustedAudit.nonAuthoritative.classification==='good','Non-authoritative preview mutated page classification: '+JSON.stringify(untrustedAudit.nonAuthoritative));
-    assert(untrustedAudit.nonAuthoritative.warnings.length===0,'Non-authoritative preview persisted final render warnings: '+JSON.stringify(untrustedAudit.nonAuthoritative));
-    assert(untrustedAudit.nonAuthoritative.finalText==='$x^2$','Non-authoritative preview changed final text');
-    assert(!localMathJaxRequests.some(x=>/extensions\/(?:html|require)\.js(?:$|\?)/.test(x)),'Untrusted TeX caused a disabled extension fetch: '+JSON.stringify(localMathJaxRequests));
 
+      return {
+        cases:out,
+        nonAuthoritative,
+        packages:Array.isArray(window.MathJax?.config?.tex?.packages)?[...window.MathJax.config.tex.packages]:window.MathJax?.config?.tex?.packages||null
+      };
+    },regressionFixtures.renderer);
+
+    assert(rendererAudit.cases.length===regressionFixtures.renderer.length,'Renderer fixture corpus did not run completely');
+    for(const x of rendererAudit.cases){
+      assert(x.finalText===regressionFixtures.renderer.find(y=>y.name===x.name)?.tex,'Renderer fixture changed source text '+x.name+': '+JSON.stringify(x));
+      assert(!x.jsLink&&!x.fixed,'Renderer fixture injected active HTML/CSS '+x.name+': '+JSON.stringify(x));
+      if(x.expect==='render'){
+        assert(x.classification==='good','Valid renderer fixture was not kept Good '+x.name+': '+JSON.stringify(x));
+        assert(!x.warning,'Valid renderer fixture produced warning '+x.name+': '+JSON.stringify(x));
+        assert(x.renderedSvg===true&&x.hasMerror===false,'Valid renderer fixture did not produce clean SVG '+x.name+': '+JSON.stringify(x));
+      }else{
+        assert(x.classification==='mathunsure','Bad/untrusted renderer fixture was not flagged Math Unsure '+x.name+': '+JSON.stringify(x));
+        assert(/TeX error|unrenderable TeX/i.test(x.warning),'Bad/untrusted renderer fixture did not preserve a render warning '+x.name+': '+JSON.stringify(x));
+      }
+    }
+    assert(rendererAudit.nonAuthoritative.classification==='good','Non-authoritative preview mutated page classification: '+JSON.stringify(rendererAudit.nonAuthoritative));
+    assert(rendererAudit.nonAuthoritative.warnings.length===0,'Non-authoritative preview persisted final render warnings: '+JSON.stringify(rendererAudit.nonAuthoritative));
+    assert(rendererAudit.nonAuthoritative.finalText==='$x^2$','Non-authoritative preview changed final text');
+    if(Array.isArray(rendererAudit.packages)){
+      for(const blocked of ['html','noundefined','require'])assert(!rendererAudit.packages.includes(blocked),'Live MathJax package policy drifted; blocked package loaded: '+blocked);
+    }
+
+    // Exercise the actual PDF/print window, not only exportPdfPile source text.
+    const popupPromise=page.waitForEvent('popup');
+    await page.evaluate(()=>exportPdfPile([
+      {name:'renderer-parity.pdf-fixture',text:'$\\frac{1}{2}+\\cancel{x}$',classification:'good',metadata:{},documentId:''}
+    ],'Renderer parity'));
+    const printPage=await popupPromise;
+    await printPage.locator('mjx-container svg').first().waitFor({state:'attached',timeout:10000});
+    await printPage.waitForFunction(()=>window.__mathPhotoPrintCalled===true,null,{timeout:10000});
+    const printAudit=await printPage.evaluate(()=>({
+      renderedSvg:!!document.querySelector('mjx-container svg'),
+      hasMerror:!!document.querySelector('mjx-merror,[data-mml-node="merror"]'),
+      packages:Array.isArray(window.MathJax?.config?.tex?.packages)?[...window.MathJax.config.tex.packages]:window.MathJax?.config?.tex?.packages||null,
+      scriptSrcs:[...document.scripts].map(x=>x.src).filter(Boolean),
+      embeddedSource:document.documentElement.innerHTML.includes('MathJax 3.2.2 tex-svg-full EMBEDDED'),
+      printCalled:window.__mathPhotoPrintCalled===true
+    }));
+    assert(printAudit.renderedSvg===true&&printAudit.hasMerror===false,'PDF/print path did not render clean SVG: '+JSON.stringify(printAudit));
+    assert(printAudit.printCalled===true,'PDF/print path did not reach the print-ready state');
+    if(Array.isArray(printAudit.packages)){
+      for(const blocked of ['html','noundefined','require'])assert(!printAudit.packages.includes(blocked),'PDF MathJax package policy drifted; blocked package loaded: '+blocked);
+    }
+    if(offlineMode){
+      assert(printAudit.embeddedSource===true,'Offline PDF/print window did not reuse embedded tex-svg-full source');
+      assert(!printAudit.scriptSrcs.some(x=>x.includes('/vendor/mathjax/')),'Offline PDF/print unexpectedly loaded companion MathJax: '+JSON.stringify(printAudit.scriptSrcs));
+    }else{
+      assert(printAudit.scriptSrcs.some(x=>x.includes('/vendor/mathjax/tex-svg-full.js')),'Normal PDF/print did not load pinned local tex-svg-full: '+JSON.stringify(printAudit.scriptSrcs));
+    }
+    await printPage.close();
 
     assert(!/cdn\.jsdelivr\.net\/npm\/mathjax/i.test(mathJaxSourceAudit.printSource),'PDF export still references remote MathJax');
     if(offlineMode){
       assert(mathJaxSourceAudit.embedded===true,'Offline build is missing embedded tex-svg MathJax source');
       assert(mathJaxSourceAudit.renderedSvg===true,'Offline build did not render MathJax through SVG output');
-      assert(localMathJaxRequests.length===0,'Offline build unexpectedly requested companion MathJax files: '+JSON.stringify(localMathJaxRequests));
+      assert(localMathJaxRequests.length===0,'Offline build unexpectedly requested companion MathJax files from live or PDF paths: '+JSON.stringify(localMathJaxRequests));
       assert(mathJaxSourceAudit.printSource.includes('embedded-mathjax-source'),'Offline PDF export does not reuse the embedded MathJax source');
     }else{
       assert(mathJaxSourceAudit.renderedSvg===true,'Normal build did not render MathJax through SVG output');
       assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/tex-svg-full.js')),'Pinned MathJax tex-svg-full bundle was not loaded from the local vendor tree');
-      assert(!localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/output/chtml')),'Normal build unexpectedly loaded CHTML output assets: '+JSON.stringify(localMathJaxRequests));
-      assert(!localMathJaxRequests.some(x=>/\/vendor\/mathjax\/output\/chtml\/fonts\//.test(x)),'Normal build unexpectedly loaded CHTML webfonts: '+JSON.stringify(localMathJaxRequests));
+      assert(localMathJaxRequests.every(x=>x.includes('/vendor/mathjax/tex-svg-full.js')),'Normal live/PDF paths requested an unexpected MathJax companion asset: '+JSON.stringify(localMathJaxRequests));
       assert(mathJaxSourceAudit.printSource.includes("vendor/mathjax/tex-svg-full.js"),'PDF export no longer points at the pinned local tex-svg-full bundle');
     }
     await context.close();
