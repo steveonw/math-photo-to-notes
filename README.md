@@ -22,6 +22,8 @@ Post-Release-C hardening makes math returns **LaTeX-safe**. The preferred extern
 
 Release D activates **High Assurance Math** as an optional, off-by-default independent verification layer for Good pages. The default **Math-heavy only** policy uses deterministic notation signals to decide which otherwise-Good pages receive one fresh Secondary re-read. **Any detected math** and **All Good pages** policies are also available. The verifier reads the original image without being shown the Primary transcription. Agreement is preserved as verification evidence; disagreement keeps the Primary text, stores the Secondary reading, and moves the page to Review with no automatic winner. High Assurance disagreement does not continue into Auto-fix.
 
+Release E hardens the infrastructure underneath that workflow: targeted-region work is durably resumable, project files use explicit v1→v2 migrations, browser regressions have a checked-in fixture corpus, large archives have a compressed/memory-aware path, and image-review assistance remains evidence-driven and non-destructive. MathJax is fully local in the normal app, and the repo now also supports an EquationWright-style **single-file offline build** with pinned MathJax 3.2.2 `tex-svg.js`.
+
 ## Current capabilities
 
 - Primary and Secondary vision-AI configurations
@@ -29,12 +31,17 @@ Release D activates **High Assurance Math** as an optional, off-by-default indep
 - Good / Review / Unclear / Math Unsure / Approved / Needs Reapproval / Needs Refresh / Failed / Interrupted states
 - raw / repaired / final transcription lineage and revision history
 - conservative LaTeX repair plus deterministic validation
-- live MathJax review and PDF export
+- fully local MathJax live review and PDF export
+- reproducible one-file offline build with embedded pinned MathJax tex-svg
 - guided human review, anchored flags, and keyboard workflow
 - document/notebook organization, metadata, page ordering, and page-number suggestions
 - optional bounded automatic Primary/Secondary routing
 - optional High Assurance verification of otherwise-Good pages with deterministic math triggers, independent Secondary re-read, visible added usage/cost, and disagreement → Review
 - targeted equation/region crop retries and model-disagreement review
+- durable targeted-region queue persistence across reload/resume
+- explicit versioned project-schema migrations and checked-in regression fixtures
+- compressed/memory-aware large project archives
+- evidence-driven non-destructive image review assist
 - versioned project Save/Open
 - project archive ZIP, page/region review-package ZIPs, and external-AI round-trip review packages
 - tolerant external correction import with mandatory diff / Accept / Reject / Edit
@@ -48,6 +55,21 @@ Open:
 `photo_to_text.html`
 
 in a modern browser.
+
+## Single-file offline build
+
+For a one-file edition with MathJax embedded inline:
+
+```bash
+python3 scripts/fetch_mathjax.py
+python3 make_offline_build.py
+```
+
+This produces:
+
+`photo_to_text_OFFLINE.html`
+
+The fetch helper pins MathJax 3.2.2 `tex-svg.js` and verifies the exact Git blob SHA before the builder embeds it. The generated file needs no MathJax network request or companion MathJax folder. Live preview uses embedded SVG MathJax, and PDF/print export reuses the same embedded engine.
 
 ## Testing
 
@@ -67,6 +89,9 @@ The browser suite must exercise the real standalone page, not only parse its Jav
 - Good-page spot-check persistence and human-found error handling
 - external-AI package contract, tolerant import parsing, mandatory diff, accept/reject behavior, and Approved → Needs Reapproval lineage
 - High Assurance deterministic math triggers, formatting-only normalization, independent agreement, sign-level disagreement, Primary-text preservation, no automatic winner, usage/provenance visibility, and no Auto-fix continuation after disagreement
+- durable targeted-region/migration fixture behavior, archive hardening, and image-review-assist evidence gates
+- local MathJax startup/components/webfonts with no remote executable script
+- generated one-file offline `tex-svg` edition through the same full Chromium smoke suite
 
 ## Project docs
 
@@ -85,4 +110,4 @@ A successful provider response must be preserved before any local repair, valida
 
 ## Status
 
-The numbered Upgrade 1–10 roadmap and Releases A–D are complete. **Release E — Infrastructure Hardening** is the next active roadmap milestone.
+The numbered Upgrade 1–10 roadmap and Releases A–E are complete. Current work is evidence-driven maintenance, regression expansion, bug fixing, and product refinement rather than a new numbered release.
