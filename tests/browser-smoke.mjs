@@ -281,15 +281,21 @@ try{
       {name:'renderer-parity.pdf-fixture',text:'$\\frac{1}{2}+\\cancel{x}$',classification:'good',metadata:{},documentId:''}
     ],'Renderer parity'));
     const printPage=await popupPromise;
-    await printPage.locator('mjx-container svg').first().waitFor({state:'attached',timeout:10000});
-    await printPage.waitForFunction(()=>window.__mathPhotoPrintCalled===true,null,{timeout:10000});
+    await printPage.waitForTimeout(1500);
     const printAudit=await printPage.evaluate(()=>({
       renderedSvg:!!document.querySelector('mjx-container svg'),
       hasMerror:!!document.querySelector('mjx-merror,[data-mml-node="merror"]'),
       packages:Array.isArray(window.MathJax?.config?.tex?.packages)?[...window.MathJax.config.tex.packages]:window.MathJax?.config?.tex?.packages||null,
       scriptSrcs:[...document.scripts].map(x=>x.src).filter(Boolean),
+      scriptCount:document.scripts.length,
       embeddedSource:document.documentElement.innerHTML.includes('MathJax 3.2.2 tex-svg-full EMBEDDED'),
-      printCalled:window.__mathPhotoPrintCalled===true
+      printCalled:window.__mathPhotoPrintCalled===true,
+      readyState:document.readyState,
+      mathJaxKeys:window.MathJax?Object.keys(window.MathJax).sort():[],
+      startupPromise:!!window.MathJax?.startup?.promise,
+      typesetPromise:typeof window.MathJax?.typesetPromise==='function',
+      bodyText:(document.body?.innerText||'').slice(0,500),
+      htmlHead:(document.documentElement?.outerHTML||'').slice(0,1200)
     }));
     assert(printAudit.renderedSvg===true&&printAudit.hasMerror===false,'PDF/print path did not render clean SVG: '+JSON.stringify(printAudit));
     assert(printAudit.printCalled===true,'PDF/print path did not reach the print-ready state');
