@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Fetch the exact MathJax tex-svg-full browser bundle used by the offline builder.
 
-This mirrors the proven EquationWright offline-build pattern, but pins the
-bundle to MathJax 3.2.2 and verifies the exact Git blob identity before use.
+This keeps the EquationWright-inspired single-file packaging approach, while
+Photo to Notes intentionally pins the broader MathJax 3.2.2 tex-svg-full bundle
+and verifies the exact Git blob identity before use.
 """
 from __future__ import annotations
 
