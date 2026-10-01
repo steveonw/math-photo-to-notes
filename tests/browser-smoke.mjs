@@ -278,7 +278,8 @@ try{
           hasMerror:!!root?.querySelector('mjx-merror,[data-mml-node="merror"]'),
           bodyActive:document.body.classList.contains('math-photo-print-active'),
           title:document.title,
-          rootText:(root?.innerText||'').slice(0,500),
+          rootText:(root?.textContent||'').slice(0,500),
+          filename:root?.querySelector('.filename')?.textContent||'',
           packages:Array.isArray(window.MathJax?.config?.tex?.packages)?[...window.MathJax.config.tex.packages]:window.MathJax?.config?.tex?.packages||null
         };
       };
@@ -297,7 +298,7 @@ try{
     assert(printAudit.audit.renderedSvg===true&&printAudit.audit.hasMerror===false,'PDF/print staging did not render clean SVG: '+JSON.stringify(printAudit));
     assert(printAudit.audit.bodyActive===true,'Print staging class was not active when print was invoked');
     assert(printAudit.audit.title==='Renderer parity','Print title was not applied before printing: '+JSON.stringify(printAudit));
-    assert(/renderer-parity\.pdf-fixture/.test(printAudit.audit.rootText),'Print staging did not contain the requested page: '+JSON.stringify(printAudit));
+    assert(printAudit.audit.filename.includes('renderer-parity.pdf-fixture')&&/renderer-parity\.pdf-fixture/.test(printAudit.audit.rootText),'Print staging did not contain the requested page: '+JSON.stringify(printAudit));
     if(Array.isArray(printAudit.audit.packages)){
       for(const blocked of ['html','noundefined','require'])assert(!printAudit.audit.packages.includes(blocked),'PDF MathJax package policy drifted; blocked package loaded: '+blocked);
     }
