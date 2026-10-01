@@ -3536,6 +3536,8 @@ function exportPdfPile(list,title){
    <div class="transcription">${textToPrintableHTML(i.text)}</div>
  </section>`).join('');
 
+ const mathJaxStartupURL=new URL('./vendor/mathjax/startup.js',location.href).href;
+ const mathJaxFontURL=new URL('./vendor/mathjax/output/chtml/fonts/woff-v2',location.href).href;
  const w=window.open('','_blank');
  if(!w){alert('The browser blocked the PDF window. Allow pop-ups for this file and try again.');return}
  try{w.opener=null}catch(e){}
@@ -3545,11 +3547,18 @@ function exportPdfPile(list,title){
  <title>${htmlEscape(title)}</title>
  <script>
  window.MathJax={
-   tex:{inlineMath:[['\\\\(','\\\\)'],['$','$']],displayMath:[['\\\\[','\\\\]'],['$$','$$']],processEscapes:true},
+   loader:{load:['input/tex','output/chtml','[tex]/ams','[tex]/newcommand','[tex]/noundefined']},
+   tex:{
+     inlineMath:[['\\\\(','\\\\)'],['$','$']],
+     displayMath:[['\\\\[','\\\\]'],['$$','$$']],
+     processEscapes:true,
+     packages:{'[+]':['ams','newcommand','noundefined']}
+   },
+   chtml:{fontURL:${JSON.stringify(mathJaxFontURL)}},
    options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
  };
  <\/script>
- <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js"><\/script>
+ <script defer src="${htmlEscape(mathJaxStartupURL)}"><\/script>
  <style>
   @page{size:auto;margin:0.6in}
   body{font-family:Georgia,'Times New Roman',serif;color:#111;line-height:1.5;margin:0}
