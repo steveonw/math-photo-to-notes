@@ -3553,7 +3553,7 @@ function exportPdfPile(list,title){
    options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
  };
  const configScript='<script>window.MathJax='+JSON.stringify(printMathJaxConfig).replace(/</g,'\\u003c')+';<\/script>';
- const engineScript=embeddedMathJaxSource?'<script>'+embeddedSafe+'<\/script>':'<script src="'+htmlEscape(mathJaxBundleURL)+'"><\/script>';
+ const engineScript=embeddedMathJaxSource?'<script>'+embeddedSafe+'<\/script>':'<script defer src="'+htmlEscape(mathJaxBundleURL)+'"><\/script>';
  const mathJaxMarkup=configScript+'\n'+engineScript;
  const w=window.open('','_blank');
  if(!w){alert('The browser blocked the PDF window. Allow pop-ups for this file and try again.');return}
@@ -3588,13 +3588,22 @@ function exportPdfPile(list,title){
  <script>
  (async function(){
    try{
+     // In the normal build the renderer is a deferred local script. Yield until it
+     // has installed the real startup/typeset API; the offline build is already ready.
+     for(let n=0;n<200&&typeof window.MathJax?.typesetPromise!=='function';n++){
+       await new Promise(resolve=>setTimeout(resolve,25));
+     }
      if(window.MathJax && MathJax.startup && MathJax.startup.promise){
        await MathJax.startup.promise;
      }
      if(window.MathJax && MathJax.typesetPromise){
        await MathJax.typesetPromise();
+     }else{
+       throw new Error('MathJax PDF renderer did not become ready.');
      }
-   }catch(e){}
+   }catch(e){
+     console.error('MathJax PDF render failed',e);
+   }
    setTimeout(()=>window.print(),250);
  })();
  <\/script>
