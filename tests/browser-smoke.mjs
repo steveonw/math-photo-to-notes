@@ -281,7 +281,12 @@ try{
       {name:'renderer-parity.pdf-fixture',text:'$\\frac{1}{2}+\\cancel{x}$',classification:'good',metadata:{},documentId:''}
     ],'Renderer parity'));
     const printPage=await popupPromise;
-    await printPage.waitForTimeout(1500);
+    try{
+      await printPage.waitForFunction(
+        ()=>document.readyState==='complete'&&typeof window.MathJax?.typesetPromise==='function'&&!!document.querySelector('mjx-container svg'),
+        null,{timeout:10000}
+      );
+    }catch(e){}
     const printAudit=await printPage.evaluate(()=>({
       renderedSvg:!!document.querySelector('mjx-container svg'),
       hasMerror:!!document.querySelector('mjx-merror,[data-mml-node="merror"]'),
