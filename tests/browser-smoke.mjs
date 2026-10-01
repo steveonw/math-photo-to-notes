@@ -194,7 +194,7 @@ try{
     const extensionAudit=await page.evaluate(async()=>{
       const host=document.createElement('div');
       host.id='mathjax-full-extension-smoke';
-      host.textContent='$\\\\cancel{x}$';
+      host.textContent='$\\cancel{x}$';
       document.body.appendChild(host);
       try{
         if(window.MathJax?.typesetPromise)await window.MathJax.typesetPromise([host]);
@@ -218,10 +218,10 @@ try{
       const cases={
         malformedExponent:'$x^$',
         extraBrace:'$x}$',
-        undefinedMacro:'$\\\\foo{x}$',
-        jsLink:'$\\\\href{javascript:alert(1)}{x}$',
-        cssInject:'$\\\\style{position:fixed;inset:0}{x}$',
-        requireHtml:'$\\\\require{html}\\\\href{javascript:alert(1)}{x}$'
+        undefinedMacro:'$\\foo{x}$',
+        jsLink:'$\\href{javascript:alert(1)}{x}$',
+        cssInject:'$\\style{position:fixed;inset:0}{x}$',
+        requireHtml:'$\\require{html}\\href{javascript:alert(1)}{x}$'
       };
       for(const [k,tex] of Object.entries(cases)){
         const id='untrusted-'+k;
