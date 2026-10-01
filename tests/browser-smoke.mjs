@@ -212,6 +212,63 @@ try{
     assert(extensionAudit.hasMerror===false,'tex-svg-full produced a MathJax error node for \\cancel: '+JSON.stringify(extensionAudit));
     assert(!localMathJaxRequests.some(x=>/extensions\/cancel\.js(?:$|\?)/.test(x)),'tex-svg-full unexpectedly fetched the cancel extension separately: '+JSON.stringify(localMathJaxRequests));
 
+    // Untrusted TeX: malformed/unknown commands must become review evidence, and HTML/CSS injection must stay inert.
+    const untrustedAudit=await page.evaluate(async()=>{
+      const out={};
+      const cases={
+        malformedExponent:'$x^$',
+        extraBrace:'$x}$',
+        undefinedMacro:'$\\\\foo{x}$',
+        jsLink:'$\\\\href{javascript:alert(1)}{x}$',
+        cssInject:'$\\\\style{position:fixed;inset:0}{x}$',
+        requireHtml:'$\\\\require{html}\\\\href{javascript:alert(1)}{x}$'
+      };
+      for(const [k,tex] of Object.entries(cases)){
+        const id='untrusted-'+k;
+        const el=document.createElement('div');
+        el.id='preview-'+id;
+        document.body.appendChild(el);
+        state.items.push({id,status:'done',classification:'good',text:tex,finalText:tex,mathRenderWarnings:[]});
+        await renderMathPreview(id,tex);
+        const it=state.items.find(x=>x.id===id);
+        out[k]={
+          classification:it.classification,
+          warning:(it.mathRenderWarnings||[]).join(' '),
+          finalText:it.finalText,
+          jsLink:!!el.querySelector('a[href^="javascript:"],[href^="javascript:"]'),
+          fixed:!!el.querySelector('[style*="position:fixed"],[style*="position: fixed"]')
+        };
+        state.items=state.items.filter(x=>x.id!==id);
+        if(window.MathJax?.typesetClear)window.MathJax.typesetClear([el]);
+        el.remove();
+      }
+
+      // Rendering a historical/raw preview must never mutate the authoritative final-page state.
+      const safeId='untrusted-nonauthoritative';
+      const safe=document.createElement('div');
+      safe.id='preview-'+safeId;
+      document.body.appendChild(safe);
+      state.items.push({id:safeId,status:'done',classification:'good',text:'$x^2$',finalText:'$x^2$',mathRenderWarnings:[]});
+      await renderMathPreview(safeId,'$x^$');
+      const safeItem=state.items.find(x=>x.id===safeId);
+      out.nonAuthoritative={classification:safeItem.classification,warnings:safeItem.mathRenderWarnings||[],finalText:safeItem.finalText};
+      state.items=state.items.filter(x=>x.id!==safeId);
+      if(window.MathJax?.typesetClear)window.MathJax.typesetClear([safe]);
+      safe.remove();
+      return out;
+    });
+    for(const [k,v] of Object.entries(untrustedAudit)){
+      if(k==='nonAuthoritative')continue;
+      assert(v.classification==='mathunsure','Bad/untrusted TeX case '+k+' was not flagged Math Unsure: '+JSON.stringify(v));
+      assert(/TeX error|unrenderable TeX/i.test(v.warning),'Bad/untrusted TeX case '+k+' did not preserve a render warning: '+JSON.stringify(v));
+      assert(!v.jsLink&&!v.fixed,'Untrusted TeX case '+k+' injected a link or fixed style into the page: '+JSON.stringify(v));
+    }
+    assert(untrustedAudit.nonAuthoritative.classification==='good','Non-authoritative preview mutated page classification: '+JSON.stringify(untrustedAudit.nonAuthoritative));
+    assert(untrustedAudit.nonAuthoritative.warnings.length===0,'Non-authoritative preview persisted final render warnings: '+JSON.stringify(untrustedAudit.nonAuthoritative));
+    assert(untrustedAudit.nonAuthoritative.finalText==='$x^2$','Non-authoritative preview changed final text');
+    assert(!localMathJaxRequests.some(x=>/extensions\/(?:html|require)\.js(?:$|\?)/.test(x)),'Untrusted TeX caused a disabled extension fetch: '+JSON.stringify(localMathJaxRequests));
+
+
     assert(!/cdn\.jsdelivr\.net\/npm\/mathjax/i.test(mathJaxSourceAudit.printSource),'PDF export still references remote MathJax');
     if(offlineMode){
       assert(mathJaxSourceAudit.embedded===true,'Offline build is missing embedded tex-svg MathJax source');
