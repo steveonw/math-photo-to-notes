@@ -198,10 +198,11 @@ try{
       assert(localMathJaxRequests.length===0,'Offline build unexpectedly requested companion MathJax files: '+JSON.stringify(localMathJaxRequests));
       assert(mathJaxSourceAudit.printSource.includes('embedded-mathjax-source'),'Offline PDF export does not reuse the embedded MathJax source');
     }else{
-      assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/startup.js')),'MathJax startup was not loaded from the local vendor tree');
-      assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/output/chtml.js')),'MathJax CHTML output code was not loaded from the local vendor tree');
-      assert(localMathJaxRequests.some(x=>/\/vendor\/mathjax\/output\/chtml\/fonts\/woff-v2\/.*\.woff(?:$|\?)/.test(x)),'MathJax CHTML webfont was not loaded from the local vendor tree: '+JSON.stringify(localMathJaxRequests.filter(x=>x.includes('/vendor/mathjax/output/chtml/fonts/'))));
-      assert(mathJaxSourceAudit.printSource.includes("vendor/mathjax/startup.js"),'PDF export no longer points at the self-hosted MathJax startup fallback');
+      assert(mathJaxSourceAudit.renderedSvg===true,'Normal build did not render MathJax through SVG output');
+      assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/tex-svg.js')),'Pinned MathJax tex-svg bundle was not loaded from the local vendor tree');
+      assert(!localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/output/chtml')),'Normal build unexpectedly loaded CHTML output assets: '+JSON.stringify(localMathJaxRequests));
+      assert(!localMathJaxRequests.some(x=>/\/vendor\/mathjax\/output\/chtml\/fonts\//.test(x)),'Normal build unexpectedly loaded CHTML webfonts: '+JSON.stringify(localMathJaxRequests));
+      assert(mathJaxSourceAudit.printSource.includes("vendor/mathjax/tex-svg.js"),'PDF export no longer points at the pinned local tex-svg bundle');
     }
     await context.close();
   }
