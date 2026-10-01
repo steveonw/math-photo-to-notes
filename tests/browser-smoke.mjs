@@ -62,12 +62,25 @@ async function newPage(){
   const context=await browser.newContext();
   const remoteMathJaxScripts=[];
   const localMathJaxRequests=[];
+  const localMathJaxResponses=[];
+  const localMathJaxFailures=[];
+  const pageErrors=[];
   context.on('request',request=>{
     const url=request.url();
     if(url.includes('/vendor/mathjax/'))localMathJaxRequests.push(url);
     if(url.includes('cdn.jsdelivr.net')&&/\.js(?:$|\?)/.test(url))remoteMathJaxScripts.push(url);
   });
+  context.on('response',response=>{
+    const url=response.url();
+    if(url.includes('/vendor/mathjax/'))localMathJaxResponses.push({url,status:response.status()});
+  });
+  context.on('requestfailed',request=>{
+    const url=request.url();
+    if(url.includes('/vendor/mathjax/'))localMathJaxFailures.push({url,error:request.failure()?.errorText||''});
+  });
+  context.on('page',p=>p.on('pageerror',e=>pageErrors.push(String(e?.message||e))));
   const page=await context.newPage();
+  page.on('pageerror',e=>pageErrors.push(String(e?.message||e)));
 
   await context.route('https://cdn.jsdelivr.net/**/tex-mml-chtml.js',route=>route.fulfill({
     status:200,
@@ -104,7 +117,7 @@ async function newPage(){
     document.getElementById('apikey').value='test-key';
     document.getElementById('auto-routing').checked=false;
   });
-  return {context,page,remoteMathJaxScripts,localMathJaxRequests};
+  return {context,page,remoteMathJaxScripts,localMathJaxRequests,localMathJaxResponses,localMathJaxFailures,pageErrors};
 }
 
 async function addFixture(page,name='fixture.png'){
@@ -181,7 +194,7 @@ try{
   {
     anthropicResponse=mathResponse;
     anthropicCalls=0;
-    const {context,page,remoteMathJaxScripts,localMathJaxRequests}=await newPage();
+    const {context,page,remoteMathJaxScripts,localMathJaxRequests,localMathJaxResponses,localMathJaxFailures,pageErrors}=await newPage();
     await addFixture(page,'math-fixture.png');
     const item=await processOne(page);
     assert(item.badge!=='Failed','Math transcription was marked Failed: '+JSON.stringify(item));
@@ -302,7 +315,7 @@ try{
       bodyText:(document.body?.innerText||'').slice(0,500),
       htmlHead:(document.documentElement?.outerHTML||'').slice(0,1200)
     }));
-    assert(printAudit.renderedSvg===true&&printAudit.hasMerror===false,'PDF/print path did not render clean SVG: '+JSON.stringify(printAudit));
+    assert(printAudit.renderedSvg===true&&printAudit.hasMerror===false,'PDF/print path did not render clean SVG: '+JSON.stringify({printAudit,localMathJaxResponses,localMathJaxFailures,pageErrors}));
     assert(printAudit.printCalled===true,'PDF/print path did not reach the print-ready state');
     if(Array.isArray(printAudit.packages)){
       for(const blocked of ['html','noundefined','require'])assert(!printAudit.packages.includes(blocked),'PDF MathJax package policy drifted; blocked package loaded: '+blocked);
