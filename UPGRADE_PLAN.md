@@ -1892,10 +1892,10 @@ The two editions must share all application logic. The offline build is a packag
 
 - [x] **Step 1 — SVG parity.** Switch the normal live-preview and PDF/print paths from CHTML to pinned MathJax 3.2.2 `tex-svg.js`, matching the existing offline renderer. Keep legacy CHTML files temporarily until cleanup.
 - [x] **Step 2 — Broader self-contained math surface.** Move Photo to Notes to exact pinned MathJax 3.2.2 `tex-svg-full.js` for both normal and offline builds; browser smoke verifies an extension command (`\\cancel`) renders through SVG without a MathJax error node.
-- [ ] **Step 3 — Render errors as evidence.** Harden MathJax error-node/error handling so malformed AI TeX preserves transcription evidence and moves the page toward review without inventing a correction.
+- [x] **Step 3 — Render errors as evidence.** Treat rendered MathJax `merror` nodes as deterministic review evidence; preserve authoritative final text and move only Good pages to Math Unsure without inventing a correction.
 - [ ] **Step 4 — Renderer parity corpus.** Add normal/offline browser fixtures for ordinary math, matrices/structures, extension-heavy commands such as `\\cancel`, and intentionally malformed TeX.
 - [ ] **Step 5 — Remove renderer drift.** Assert that normal preview, offline preview, and PDF/print use the same pinned MathJax version/output policy and do not request remote executable MathJax.
-- [ ] **Step 6 — Cleanup.** Remove obsolete CHTML-specific assets/configuration only after the SVG paths and regression corpus are green.
+- [x] **Step 6 — Cleanup.** Remove obsolete CHTML/startup/component assets and the prior `tex-svg.js` bundle after SVG parity and focused untrusted-TeX regression coverage are green.
 
 ## Step 1 acceptance criteria
 
@@ -1917,4 +1917,20 @@ The two editions must share all application logic. The offline build is a packag
 - no companion extension fetch is required for that tested command
 - no transcription/review/provenance behavior changes as part of the bundle migration
 - both normal and generated offline editions pass browser CI
+
+## Step 3 acceptance criteria
+
+- AI/external-correction TeX is treated as untrusted input
+- MathJax packages `html`, `noundefined`, and `require` are disabled in live preview, PDF/print config, and the offline build
+- rendered `merror` nodes are detected even when `typesetPromise` resolves successfully
+- malformed/undefined TeX preserves source/final text and moves an otherwise-Good page to Math Unsure
+- existing Review / Unclear / Needs Reapproval / Needs Refresh states are not overwritten by render classification
+- raw/repaired/historical previews cannot mutate authoritative final-page render warnings or classification
+- `\\href{javascript:...}`, `\\style{...}`, and `\\require{html}` cannot inject active links/styles
+- legitimate bundled extensions such as `\\cancel` still render
+- normal and generated offline editions pass the same Chromium smoke suite
+
+## Renderer cleanup status
+
+The repository now keeps only `vendor/mathjax/LICENSE` and pinned `vendor/mathjax/tex-svg-full.js`. The superseded CHTML/startup/input/output tree and the old `tex-svg.js` bundle are removed.
 
