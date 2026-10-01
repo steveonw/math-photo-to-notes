@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Build a single-file offline edition with MathJax tex-svg-full embedded inline.
 
-Adapted from the proven EquationWright offline-build pattern. The normal app
-keeps readable/local development assets; this builder injects the pinned
-tex-svg-full.js bundle before the main app script so live preview and PDF export can
-reuse the same embedded runtime without network access or companion folders.
+Uses an EquationWright-inspired single-file packaging approach, but Photo to Notes
+intentionally embeds the broader pinned tex-svg-full.js bundle. The normal app loads
+that same local bundle; this builder injects it before the main app script so live
+preview and PDF export reuse the same runtime without network access or companion folders.
 """
 from __future__ import annotations
 
