@@ -69,7 +69,7 @@ This produces:
 
 `photo_to_text_OFFLINE.html`
 
-The fetch helper pins MathJax 3.2.2 `tex-svg.js` and verifies the exact Git blob SHA before the builder embeds it. The generated file needs no MathJax network request or companion MathJax folder. Live preview uses embedded SVG MathJax, and PDF/print export reuses the same embedded engine.
+The fetch helper pins MathJax 3.2.2 `tex-svg-full.js` and verifies the exact Git blob SHA before the builder embeds it. The generated file needs no MathJax network request or companion MathJax folder. Live preview uses embedded SVG MathJax, and PDF/print export reuses the same embedded engine.
 
 ## Testing
 
@@ -90,7 +90,7 @@ The browser suite must exercise the real standalone page, not only parse its Jav
 - external-AI package contract, tolerant import parsing, mandatory diff, accept/reject behavior, and Approved → Needs Reapproval lineage
 - High Assurance deterministic math triggers, formatting-only normalization, independent agreement, sign-level disagreement, Primary-text preservation, no automatic winner, usage/provenance visibility, and no Auto-fix continuation after disagreement
 - durable targeted-region/migration fixture behavior, archive hardening, and image-review-assist evidence gates
-- local pinned MathJax `tex-svg.js` rendering with no remote executable script
+- local pinned MathJax `tex-svg-full.js` rendering with no remote executable script
 - generated one-file offline `tex-svg` edition through the same full Chromium smoke suite
 
 ## Project docs
