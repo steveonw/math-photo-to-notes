@@ -1891,7 +1891,7 @@ The two editions must share all application logic. The offline build is a packag
 ## Renderer-hardening steps
 
 - [x] **Step 1 — SVG parity.** Switch the normal live-preview and PDF/print paths from CHTML to pinned MathJax 3.2.2 `tex-svg.js`, matching the existing offline renderer. Keep legacy CHTML files temporarily until cleanup.
-- [ ] **Step 2 — Broader self-contained math surface.** Evaluate and, if regression-tested, move Photo to Notes to pinned MathJax 3.2.2 `tex-svg-full.js` for both normal and offline builds.
+- [x] **Step 2 — Broader self-contained math surface.** Move Photo to Notes to exact pinned MathJax 3.2.2 `tex-svg-full.js` for both normal and offline builds; browser smoke verifies an extension command (`\\cancel`) renders through SVG without a MathJax error node.
 - [ ] **Step 3 — Render errors as evidence.** Harden MathJax error-node/error handling so malformed AI TeX preserves transcription evidence and moves the page toward review without inventing a correction.
 - [ ] **Step 4 — Renderer parity corpus.** Add normal/offline browser fixtures for ordinary math, matrices/structures, extension-heavy commands such as `\\cancel`, and intentionally malformed TeX.
 - [ ] **Step 5 — Remove renderer drift.** Assert that normal preview, offline preview, and PDF/print use the same pinned MathJax version/output policy and do not request remote executable MathJax.
@@ -1906,4 +1906,15 @@ The two editions must share all application logic. The offline build is a packag
 - no remote executable MathJax is required
 - existing transcription, provenance, review, and failure-preservation behavior is unchanged
 - both normal and generated offline editions pass the browser smoke suite
+
+## Step 2 acceptance criteria
+
+- normal live preview loads local pinned `vendor/mathjax/tex-svg-full.js`
+- offline builder embeds that same exact MathJax 3.2.2 bundle
+- fetch/build verification pins Git blob SHA-1 `b3388d20a8d2773b001eebd3211ef1a337335d67`
+- PDF/print continues to use the same SVG bundle policy
+- `\\cancel{x}` renders as SVG with no MathJax error node in both normal and offline smoke runs
+- no companion extension fetch is required for that tested command
+- no transcription/review/provenance behavior changes as part of the bundle migration
+- both normal and generated offline editions pass browser CI
 
