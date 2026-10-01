@@ -63,6 +63,7 @@ async function newPage(){
   const remoteMathJaxScripts=[];
   const localMathJaxRequests=[];
   const localMathJaxResponses=[];
+  const localMathJaxFinished=[];
   const localMathJaxFailures=[];
   const pageErrors=[];
   context.on('request',request=>{
@@ -73,6 +74,10 @@ async function newPage(){
   context.on('response',response=>{
     const url=response.url();
     if(url.includes('/vendor/mathjax/'))localMathJaxResponses.push({url,status:response.status()});
+  });
+  context.on('requestfinished',request=>{
+    const url=request.url();
+    if(url.includes('/vendor/mathjax/'))localMathJaxFinished.push({url,frame:request.frame()?.url?.()||'',type:request.resourceType()});
   });
   context.on('requestfailed',request=>{
     const url=request.url();
@@ -117,7 +122,7 @@ async function newPage(){
     document.getElementById('apikey').value='test-key';
     document.getElementById('auto-routing').checked=false;
   });
-  return {context,page,remoteMathJaxScripts,localMathJaxRequests,localMathJaxResponses,localMathJaxFailures,pageErrors};
+  return {context,page,remoteMathJaxScripts,localMathJaxRequests,localMathJaxResponses,localMathJaxFinished,localMathJaxFailures,pageErrors};
 }
 
 async function addFixture(page,name='fixture.png'){
@@ -194,7 +199,7 @@ try{
   {
     anthropicResponse=mathResponse;
     anthropicCalls=0;
-    const {context,page,remoteMathJaxScripts,localMathJaxRequests,localMathJaxResponses,localMathJaxFailures,pageErrors}=await newPage();
+    const {context,page,remoteMathJaxScripts,localMathJaxRequests,localMathJaxResponses,localMathJaxFinished,localMathJaxFailures,pageErrors}=await newPage();
     await addFixture(page,'math-fixture.png');
     const item=await processOne(page);
     assert(item.badge!=='Failed','Math transcription was marked Failed: '+JSON.stringify(item));
@@ -315,7 +320,7 @@ try{
       bodyText:(document.body?.innerText||'').slice(0,500),
       htmlHead:(document.documentElement?.outerHTML||'').slice(0,1200)
     }));
-    assert(printAudit.renderedSvg===true&&printAudit.hasMerror===false,'PDF/print path did not render clean SVG: '+JSON.stringify({printAudit,localMathJaxResponses,localMathJaxFailures,pageErrors}));
+    assert(printAudit.renderedSvg===true&&printAudit.hasMerror===false,'PDF/print path did not render clean SVG: '+JSON.stringify({printAudit,localMathJaxRequests,localMathJaxResponses,localMathJaxFinished,localMathJaxFailures,pageErrors}));
     assert(printAudit.printCalled===true,'PDF/print path did not reach the print-ready state');
     if(Array.isArray(printAudit.packages)){
       for(const blocked of ['html','noundefined','require'])assert(!printAudit.packages.includes(blocked),'PDF MathJax package policy drifted; blocked package loaded: '+blocked);
