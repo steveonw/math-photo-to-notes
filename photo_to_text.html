@@ -1685,13 +1685,22 @@ function render(){
  }).join('');
  for(const i of list)queueMathPreview(i.id,versionText(i,i.viewMode||'final'),0);
 }
+// TeX here comes from AI transcriptions and imported corrections, so treat it as untrusted:
+ // - 'html' would allow \\href, \\style, \\class and \\cssId to inject links/CSS into the app page;
+ // - 'noundefined' would render unknown macros as silent styled text instead of a detectable error;
+ // - 'require' could let untrusted TeX try to re-enable an excluded extension.
+const MATHJAX_DISABLED_PACKAGES=['html','noundefined','require'];
+// MathJax reports TeX errors by drawing merror nodes; typesetPromise does not reject for them.
+function mathJaxErrorsIn(el){
+ return [...new Set([...el.querySelectorAll('[data-mml-node="merror"],mjx-merror')].map(n=>n.getAttribute('data-mjx-error')||'unrenderable TeX'))];
+}
 let mathJaxLoadPromise=null;
 function ensureMathJax(){
  if(window.MathJax?.typesetPromise)return Promise.resolve(window.MathJax);
  if(mathJaxLoadPromise)return mathJaxLoadPromise;
  const dollar=String.fromCharCode(36);
  window.MathJax={
-   tex:{inlineMath:[['\\(','\\)'],[dollar,dollar]],displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true},
+   tex:{inlineMath:[['\\(','\\)'],[dollar,dollar]],displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true,packages:{'[-]':MATHJAX_DISABLED_PACKAGES}},
    svg:{fontCache:'global'},
    options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
  };
@@ -1713,24 +1722,29 @@ async function renderMathPreview(id,text){
  const el=$('preview-'+id);if(!el)return;
  el.classList.remove('render-error');
  el.textContent=String(text??'');
+ const i=state.items.find(x=>x.id===id);
+ // Only the current final transcription is authoritative for persisted render warnings/state.
+ // Raw/repaired revision previews may still show a local warning, but cannot mutate page state.
+ const authoritative=!!i&&String(text??'')===String(i.finalText||i.text||'');
  try{
    await ensureMathJax();
    if(!window.MathJax?.typesetPromise)return;
    if(window.MathJax.typesetClear)window.MathJax.typesetClear([el]);
    await window.MathJax.typesetPromise([el]);
-   const i=state.items.find(x=>x.id===id);
-   if(i&&i.mathRenderWarnings?.length){i.mathRenderWarnings=[];scheduleAutosave()}
+   const texErrors=mathJaxErrorsIn(el);
+   if(texErrors.length)throw new Error('TeX error: '+texErrors.join('; '));
+   if(i&&authoritative&&i.mathRenderWarnings?.length){i.mathRenderWarnings=[];scheduleAutosave()}
  }catch(e){
    el.classList.add('render-error');
    const msg=e instanceof Error?e.message:String(e);
-   const i=state.items.find(x=>x.id===id);
-   if(i){
+   if(i&&authoritative){
      i.mathRenderWarnings=[msg];
-     if(i.status==='done'&&i.classification!=='approved'){
+     if(i.status==='done'&&i.classification==='good'){
        i.classification='mathunsure';
        i.reason='MathJax could not render part of the transcription; source text was preserved for review.';
-       renderStats();scheduleAutosave();
+       renderStats();
      }
+     scheduleAutosave();
    }
    el.textContent=String(text??'')+'\n\n[MathJax render warning: '+msg+']';
  }
@@ -3534,7 +3548,7 @@ function exportPdfPile(list,title){
  const embeddedSafe=embeddedMathJaxSource.replace(/<\/script/gi,'<\\\\/script');
  const dollar='$';
  const printMathJaxConfig={
-   tex:{inlineMath:[['\\(','\\)'],[dollar,dollar]],displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true},
+   tex:{inlineMath:[['\\(','\\)'],[dollar,dollar]],displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true,packages:{'[-]':MATHJAX_DISABLED_PACKAGES}},
    svg:{fontCache:'global'},
    options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
  };
