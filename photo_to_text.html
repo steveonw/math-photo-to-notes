@@ -1691,14 +1691,11 @@ function ensureMathJax(){
  if(mathJaxLoadPromise)return mathJaxLoadPromise;
  const dollar=String.fromCharCode(36);
  window.MathJax={
-   tex:{
-     inlineMath:[['\\\\(','\\\\)'],[dollar,dollar]],
-     displayMath:[['\\\\[','\\\\]'],[dollar+dollar,dollar+dollar]],
-     processEscapes:true
-   },
+   tex:{inlineMath:[['\\(','\\)'],[dollar,dollar]],displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true},
    svg:{fontCache:'global'},
    options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
  };
+
  mathJaxLoadPromise=new Promise((resolve,reject)=>{
    const node=document.createElement('script');
    node.src='./vendor/mathjax/tex-svg.js';
@@ -1712,7 +1709,6 @@ function ensureMathJax(){
  });
  return mathJaxLoadPromise;
 }
-
 async function renderMathPreview(id,text){
  const el=$('preview-'+id);if(!el)return;
  el.classList.remove('render-error');
@@ -3535,16 +3531,16 @@ function exportPdfPile(list,title){
 
  const mathJaxBundleURL=new URL('./vendor/mathjax/tex-svg.js',location.href).href;
  const embeddedMathJaxSource=document.getElementById('embedded-mathjax-source')?.textContent||'';
- const embeddedSafe=embeddedMathJaxSource.replace(/<\\/script/gi,'<\\\\\\\\/script');
+ const embeddedSafe=embeddedMathJaxSource.replace(/<\/script/gi,'<\\\\/script');
  const dollar='$';
  const printMathJaxConfig={
-   tex:{inlineMath:[['\\\\(','\\\\)'],[dollar,dollar]],displayMath:[['\\\\[','\\\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true},
+   tex:{inlineMath:[['\\(','\\)'],[dollar,dollar]],displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true},
    svg:{fontCache:'global'},
    options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
  };
- const configScript='<script>window.MathJax='+JSON.stringify(printMathJaxConfig).replace(/</g,'\\\\u003c')+';<\\\\/script>';
- const engineScript=embeddedMathJaxSource?'<script>'+embeddedSafe+'<\\\\/script>':'<script defer src="'+htmlEscape(mathJaxBundleURL)+'"><\\\\/script>';
- const mathJaxMarkup=configScript+'\\\\n'+engineScript;
+ const configScript='<script>window.MathJax='+JSON.stringify(printMathJaxConfig).replace(/</g,'\\u003c')+';<\\/script>';
+ const engineScript=embeddedMathJaxSource?'<script>'+embeddedSafe+'<\\/script>':'<script defer src="'+htmlEscape(mathJaxBundleURL)+'"><\\/script>';
+ const mathJaxMarkup=configScript+'\\n'+engineScript;
  const w=window.open('','_blank');
  if(!w){alert('The browser blocked the PDF window. Allow pop-ups for this file and try again.');return}
  try{w.opener=null}catch(e){}
