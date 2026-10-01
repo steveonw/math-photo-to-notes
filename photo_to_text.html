@@ -1698,7 +1698,7 @@ function ensureMathJax(){
 
  mathJaxLoadPromise=new Promise((resolve,reject)=>{
    const node=document.createElement('script');
-   node.src='./vendor/mathjax/tex-svg.js';
+   node.src='./vendor/mathjax/tex-svg-full.js';
    node.async=true;
    node.onload=()=>{
      const ready=window.MathJax?.startup?.promise;
@@ -3529,7 +3529,7 @@ function exportPdfPile(list,title){
    <div class="transcription">${textToPrintableHTML(i.text)}</div>
  </section>`).join('');
 
- const mathJaxBundleURL=new URL('./vendor/mathjax/tex-svg.js',location.href).href;
+ const mathJaxBundleURL=new URL('./vendor/mathjax/tex-svg-full.js',location.href).href;
  const embeddedMathJaxSource=document.getElementById('embedded-mathjax-source')?.textContent||'';
  const embeddedSafe=embeddedMathJaxSource.replace(/<\/script/gi,'<\\\\/script');
  const dollar='$';
