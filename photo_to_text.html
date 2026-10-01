@@ -3553,7 +3553,7 @@ function exportPdfPile(list,title){
    options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
  };
  const configScript='<script>window.MathJax='+JSON.stringify(printMathJaxConfig).replace(/</g,'\\u003c')+';<\\/script>';
- const engineScript=embeddedMathJaxSource?'<script>'+embeddedSafe+'<\\/script>':'<script defer src="'+htmlEscape(mathJaxBundleURL)+'"><\\/script>';
+ const engineScript=embeddedMathJaxSource?'<script>'+embeddedSafe+'<\\/script>':'<script src="'+htmlEscape(mathJaxBundleURL)+'"><\\/script>';
  const mathJaxMarkup=configScript+'\\n'+engineScript;
  const w=window.open('','_blank');
  if(!w){alert('The browser blocked the PDF window. Allow pop-ups for this file and try again.');return}
