@@ -1921,7 +1921,7 @@ The two editions must share all application logic. The offline build is a packag
 ## Step 3 acceptance criteria
 
 - AI/external-correction TeX is treated as untrusted input
-- MathJax packages `html`, `noundefined`, and `require` are disabled in live preview, PDF/print config, and the offline build
+- MathJax packages `html`, `noundefined`, and `require` are disabled in the shared live/PDF renderer policy and the offline build
 - rendered `merror` nodes are detected even when `typesetPromise` resolves successfully
 - malformed/undefined TeX preserves source/final text and moves an otherwise-Good page to Math Unsure
 - existing Review / Unclear / Needs Reapproval / Needs Refresh states are not overwritten by render classification
@@ -1941,11 +1941,11 @@ The repository now keeps only `vendor/mathjax/LICENSE` and pinned `vendor/mathja
 - malformed/undefined/unsafe cases preserve source text and become Math Unsure review evidence
 - the same renderer corpus executes in both normal and generated offline browser suites
 - the committed `vendor/mathjax/tex-svg-full.js` Git blob SHA-1 is asserted as `b3388d20a8d2773b001eebd3211ef1a337335d67`
-- request auditing covers the main page and PDF/print popups
-- normal live preview and PDF/print may request only the pinned local `tex-svg-full.js` MathJax asset
-- offline live preview and PDF/print make no companion MathJax requests and reuse embedded source
-- the actual PDF/print popup renders SVG and reaches print-ready state
-- live preview and PDF/print both keep `html`, `noundefined`, and `require` disabled
+- request auditing covers the main page while the PDF/print path is asserted to reuse that already-loaded renderer rather than creating a second MathJax context
+- normal live preview loads only pinned local `tex-svg-full.js`; PDF/print reuses that live runtime without a second renderer load
+- offline live preview and PDF/print make no companion MathJax requests and reuse the embedded live runtime
+- the actual print-staging path renders SVG with the live runtime, invokes `window.print()`, restores the document title/state, and removes its temporary DOM/CSS
+- live preview and PDF/print share the same runtime, so the same `html`, `noundefined`, and `require` exclusions are enforced
 - no remote executable MathJax is used
 - both normal and generated offline Chromium suites pass
 
