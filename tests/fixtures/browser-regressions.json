@@ -140,5 +140,90 @@
       },
       "expected": "27"
     }
+  ],
+  "renderer": [
+    {
+      "name": "inline fraction",
+      "tex": "$\\frac{1}{2}$",
+      "expect": "render"
+    },
+    {
+      "name": "sqrt greek subscript",
+      "tex": "$\\sqrt{x}+\\theta_1$",
+      "expect": "render"
+    },
+    {
+      "name": "sum integral limits",
+      "tex": "$\\sum_{n=1}^{10}n^2+\\int_0^1x^2\\,dx$",
+      "expect": "render"
+    },
+    {
+      "name": "matrix",
+      "tex": "$\\begin{bmatrix}1&2\\\\3&4\\end{bmatrix}$",
+      "expect": "render"
+    },
+    {
+      "name": "cases",
+      "tex": "$f(x)=\\begin{cases}x^2,&x\\ge 0\\\\-x,&x<0\\end{cases}$",
+      "expect": "render"
+    },
+    {
+      "name": "aligned display",
+      "tex": "\\[\\begin{aligned}a&=b+c\\\\d&=e-f\\end{aligned}\\]",
+      "expect": "render"
+    },
+    {
+      "name": "cancel",
+      "tex": "$\\cancel{x}$",
+      "expect": "render"
+    },
+    {
+      "name": "cancel to",
+      "tex": "$\\cancelto{0}{x}$",
+      "expect": "render"
+    },
+    {
+      "name": "overset underbrace",
+      "tex": "$\\overset{?}{=}\\quad\\underbrace{x+y}_{\\text{sum}}$",
+      "expect": "render"
+    },
+    {
+      "name": "sets arrows text",
+      "tex": "$x\\in\\mathbb{R},\\ A\\subseteq B,\\ x\\mapsto x^2,\\ a\\neq b$",
+      "expect": "render"
+    },
+    {
+      "name": "malformed exponent",
+      "tex": "$x^$",
+      "expect": "error"
+    },
+    {
+      "name": "extra closing brace",
+      "tex": "$x}$",
+      "expect": "error"
+    },
+    {
+      "name": "undefined macro",
+      "tex": "$\\foo{x}$",
+      "expect": "error"
+    },
+    {
+      "name": "javascript link injection",
+      "tex": "$\\href{javascript:alert(1)}{x}$",
+      "expect": "error",
+      "unsafe": true
+    },
+    {
+      "name": "style injection",
+      "tex": "$\\style{position:fixed;inset:0}{x}$",
+      "expect": "error",
+      "unsafe": true
+    },
+    {
+      "name": "require html bypass",
+      "tex": "$\\require{html}\\href{javascript:alert(1)}{x}$",
+      "expect": "error",
+      "unsafe": true
+    }
   ]
 }

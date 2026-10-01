@@ -92,6 +92,8 @@ The browser suite must exercise the real standalone page, not only parse its Jav
 - High Assurance deterministic math triggers, formatting-only normalization, independent agreement, sign-level disagreement, Primary-text preservation, no automatic winner, usage/provenance visibility, and no Auto-fix continuation after disagreement
 - durable targeted-region/migration fixture behavior, archive hardening, and image-review-assist evidence gates
 - local pinned MathJax `tex-svg-full.js` rendering with no remote executable script
+- checked-in renderer corpus for ordinary math, matrices/cases/alignment, bundled extensions, malformed/undefined TeX, and unsafe TeX attempts
+- actual PDF/print staging SVG parity using the already-loaded live MathJax runtime, plus pinned-bundle identity, blocked-package policy, cleanup, and normal/offline request auditing
 - generated one-file offline `tex-svg-full` edition through the same full Chromium smoke suite
 
 ## Project docs
@@ -111,4 +113,4 @@ A successful provider response must be preserved before any local repair, valida
 
 ## Status
 
-The numbered Upgrade 1–10 roadmap and Releases A–E are complete. Current work is evidence-driven maintenance, regression expansion, bug fixing, and product refinement rather than a new numbered release.
+The numbered Upgrade 1–10 roadmap and Releases A–E are complete. Current work is evidence-driven maintenance, regression expansion, bug fixing, and product refinement rather than a new numbered release. The MathJax renderer-unification maintenance plan (SVG parity, `tex-svg-full`, untrusted-TeX handling, renderer corpus, parity gates, and legacy cleanup) is complete.

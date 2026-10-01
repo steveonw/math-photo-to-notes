@@ -1893,16 +1893,16 @@ The two editions must share all application logic. The offline build is a packag
 - [x] **Step 1 — SVG parity.** Switch the normal live-preview and PDF/print paths from CHTML to pinned MathJax 3.2.2 `tex-svg.js`, matching the existing offline renderer. Keep legacy CHTML files temporarily until cleanup.
 - [x] **Step 2 — Broader self-contained math surface.** Move Photo to Notes to exact pinned MathJax 3.2.2 `tex-svg-full.js` for both normal and offline builds; browser smoke verifies an extension command (`\\cancel`) renders through SVG without a MathJax error node.
 - [x] **Step 3 — Render errors as evidence.** Treat rendered MathJax `merror` nodes as deterministic review evidence; preserve authoritative final text and move only Good pages to Math Unsure without inventing a correction.
-- [ ] **Step 4 — Renderer parity corpus.** Add normal/offline browser fixtures for ordinary math, matrices/structures, extension-heavy commands such as `\\cancel`, and intentionally malformed TeX.
-- [ ] **Step 5 — Remove renderer drift.** Assert that normal preview, offline preview, and PDF/print use the same pinned MathJax version/output policy and do not request remote executable MathJax.
+- [x] **Step 4 — Renderer parity corpus.** Add a checked-in normal/offline renderer corpus covering ordinary algebra/calculus, matrices/cases/aligned structures, extension-heavy notation, malformed TeX, undefined macros, and unsafe HTML/CSS attempts.
+- [x] **Step 5 — Remove renderer drift.** Assert the exact pinned MathJax blob, exercise real live-preview and PDF/print SVG rendering, verify the same blocked-package policy, and reject any unexpected companion/remote MathJax request in normal or offline builds.
 - [x] **Step 6 — Cleanup.** Remove obsolete CHTML/startup/component assets and the prior `tex-svg.js` bundle after SVG parity and focused untrusted-TeX regression coverage are green.
 
 ## Step 1 acceptance criteria
 
 - normal live preview renders through SVG
 - normal PDF/print renders through SVG
-- offline continues to embed and render the same pinned `tex-svg.js`
-- the normal build requests the local `vendor/mathjax/tex-svg.js`, not CHTML output/webfonts
+- offline remains on the same pinned SVG renderer policy (superseded by `tex-svg-full.js` in Step 2)
+- the normal build uses the local pinned SVG bundle rather than CHTML output/webfonts (now `vendor/mathjax/tex-svg-full.js` after Step 2)
 - no remote executable MathJax is required
 - existing transcription, provenance, review, and failure-preservation behavior is unchanged
 - both normal and generated offline editions pass the browser smoke suite
@@ -1921,7 +1921,7 @@ The two editions must share all application logic. The offline build is a packag
 ## Step 3 acceptance criteria
 
 - AI/external-correction TeX is treated as untrusted input
-- MathJax packages `html`, `noundefined`, and `require` are disabled in live preview, PDF/print config, and the offline build
+- MathJax packages `html`, `noundefined`, and `require` are disabled in the shared live/PDF renderer policy and the offline build
 - rendered `merror` nodes are detected even when `typesetPromise` resolves successfully
 - malformed/undefined TeX preserves source/final text and moves an otherwise-Good page to Math Unsure
 - existing Review / Unclear / Needs Reapproval / Needs Refresh states are not overwritten by render classification
@@ -1933,4 +1933,21 @@ The two editions must share all application logic. The offline build is a packag
 ## Renderer cleanup status
 
 The repository now keeps only `vendor/mathjax/LICENSE` and pinned `vendor/mathjax/tex-svg-full.js`. The superseded CHTML/startup/input/output tree and the old `tex-svg.js` bundle are removed.
+
+## Step 4–5 acceptance criteria
+
+- the checked-in renderer corpus includes representative fractions/radicals/Greek notation, sums/integrals, matrices, cases, aligned equations, set/arrow notation, `\\cancel` / `\\cancelto`, and annotation commands
+- valid corpus cases render SVG without `merror`, warnings, source mutation, or classification changes
+- malformed/undefined/unsafe cases preserve source text and become Math Unsure review evidence
+- the same renderer corpus executes in both normal and generated offline browser suites
+- the committed `vendor/mathjax/tex-svg-full.js` Git blob SHA-1 is asserted as `b3388d20a8d2773b001eebd3211ef1a337335d67`
+- request auditing covers the main page while the PDF/print path is asserted to reuse that already-loaded renderer rather than creating a second MathJax context
+- normal live preview loads only pinned local `tex-svg-full.js`; PDF/print reuses that live runtime without a second renderer load
+- offline live preview and PDF/print make no companion MathJax requests and reuse the embedded live runtime
+- the actual print-staging path renders SVG with the live runtime, invokes `window.print()`, restores the document title/state, and removes its temporary DOM/CSS
+- live preview and PDF/print share the same runtime, so the same `html`, `noundefined`, and `require` exclusions are enforced
+- no remote executable MathJax is used
+- both normal and generated offline Chromium suites pass
+
+**Renderer-unification maintenance status:** Steps 1–6 are complete.
 
