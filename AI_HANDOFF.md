@@ -1323,9 +1323,9 @@ The default user story is:
 - durable targeted-region queue jobs with resumable persisted region work
 - explicit project v1 → v2 migrations and migration history
 - checked-in deterministic browser regression fixture corpus
-- regular browser MathJax fully self-hosted from `vendor/mathjax`
-- rendered-browser gate verifies local startup/components/webfonts and zero remote executable MathJax
-- PDF/print MathJax is local as well
+- regular browser MathJax is fully self-hosted from `vendor/mathjax`; the original CHTML/startup layout was later superseded by the single pinned `tex-svg-full.js` bundle
+- rendered-browser gate now verifies the pinned SVG bundle, renderer corpus, popup/PDF parity, and zero remote executable MathJax
+- PDF/print MathJax uses the same pinned SVG policy
 - EquationWright-inspired one-file offline packaging, now using pinned MathJax 3.2.2 `tex-svg-full.js`
 - fetch helper verifies exact Git blob SHA-1 before building
 - offline PDF path reuses the embedded tex-svg-full bundle
