@@ -32,6 +32,7 @@ Release E hardens the infrastructure underneath that workflow: targeted-region w
 - raw / repaired / final transcription lineage and revision history
 - conservative LaTeX repair plus deterministic validation
 - fully local pinned MathJax 3.2.2 SVG live review and PDF export
+- untrusted TeX rendering hardened by disabling MathJax `html`, `noundefined`, and `require`; render-error nodes surface as review evidence without altering source text
 - reproducible one-file offline build with embedded pinned MathJax tex-svg-full
 - guided human review, anchored flags, and keyboard workflow
 - document/notebook organization, metadata, page ordering, and page-number suggestions
@@ -69,7 +70,7 @@ This produces:
 
 `photo_to_text_OFFLINE.html`
 
-The fetch helper pins MathJax 3.2.2 `tex-svg-full.js` and verifies the exact Git blob SHA before the builder embeds it. The generated file needs no MathJax network request or companion MathJax folder. Live preview uses embedded SVG MathJax, and PDF/print export reuses the same embedded engine.
+The fetch helper pins MathJax 3.2.2 `tex-svg-full.js` and verifies the exact Git blob SHA before the builder embeds it. The generated file needs no MathJax network request or companion MathJax folder. Live preview uses embedded SVG MathJax, and PDF/print export reuses the same embedded engine. TeX is treated as untrusted input: HTML/require-style MathJax features are disabled, malformed or undefined TeX is surfaced for review, and the original transcription text is preserved. The vendored renderer tree is intentionally minimal: `LICENSE` plus the single pinned `tex-svg-full.js` bundle.
 
 ## Testing
 

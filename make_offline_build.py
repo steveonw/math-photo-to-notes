@@ -74,7 +74,8 @@ window.MathJax={
   tex:{
     inlineMath:[['\\\\(','\\\\)'],['$','$']],
     displayMath:[['\\\\[','\\\\]'],['$$','$$']],
-    processEscapes:true
+    processEscapes:true,
+    packages:{'[-]':['html','noundefined','require']}
   },
   svg:{fontCache:'global'},
   options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
