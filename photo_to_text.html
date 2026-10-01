@@ -3538,6 +3538,22 @@ function exportPdfPile(list,title){
 
  const mathJaxStartupURL=new URL('./vendor/mathjax/startup.js',location.href).href;
  const mathJaxFontURL=new URL('./vendor/mathjax/output/chtml/fonts/woff-v2',location.href).href;
+ const embeddedMathJaxSource=document.getElementById('embedded-mathjax-source')?.textContent||'';
+ const embeddedSafe=embeddedMathJaxSource.replace(/<\/script/gi,'<\\\\/script');
+ const dollar='$';
+ const printMathJaxConfig=embeddedMathJaxSource?{
+   tex:{inlineMath:[['\\(','\\)'],[dollar,dollar]],displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true},
+   svg:{fontCache:'global'},
+   options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
+ }:{
+   loader:{load:['input/tex','output/chtml','[tex]/ams','[tex]/newcommand','[tex]/noundefined']},
+   tex:{inlineMath:[['\\(','\\)'],[dollar,dollar]],displayMath:[['\\[','\\]'],[dollar+dollar,dollar+dollar]],processEscapes:true,packages:{'[+]':['ams','newcommand','noundefined']}},
+   chtml:{fontURL:mathJaxFontURL},
+   options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
+ };
+ const configScript='<script>window.MathJax='+JSON.stringify(printMathJaxConfig).replace(/</g,'\\u003c')+';<\\/script>';
+ const engineScript=embeddedMathJaxSource?'<script>'+embeddedSafe+'<\\/script>':'<script defer src="'+htmlEscape(mathJaxStartupURL)+'"><\\/script>';
+ const mathJaxMarkup=configScript+'\\n'+engineScript;
  const w=window.open('','_blank');
  if(!w){alert('The browser blocked the PDF window. Allow pop-ups for this file and try again.');return}
  try{w.opener=null}catch(e){}
@@ -3545,20 +3561,7 @@ function exportPdfPile(list,title){
  w.document.write(`<!doctype html>
  <html><head><meta charset="utf-8">
  <title>${htmlEscape(title)}</title>
- <script>
- window.MathJax={
-   loader:{load:['input/tex','output/chtml','[tex]/ams','[tex]/newcommand','[tex]/noundefined']},
-   tex:{
-     inlineMath:[['\\\\(','\\\\)'],['$','$']],
-     displayMath:[['\\\\[','\\\\]'],['$$','$$']],
-     processEscapes:true,
-     packages:{'[+]':['ams','newcommand','noundefined']}
-   },
-   chtml:{fontURL:${JSON.stringify(mathJaxFontURL)}},
-   options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
- };
- <\/script>
- <script defer src="${htmlEscape(mathJaxStartupURL)}"><\/script>
+ ${mathJaxMarkup}
  <style>
   @page{size:auto;margin:0.6in}
   body{font-family:Georgia,'Times New Roman',serif;color:#111;line-height:1.5;margin:0}
