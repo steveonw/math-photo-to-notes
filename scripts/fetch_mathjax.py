@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch the exact MathJax tex-svg browser bundle used by the offline builder.
+"""Fetch the exact MathJax tex-svg-full browser bundle used by the offline builder.
 
 This mirrors the proven EquationWright offline-build pattern, but pins the
 bundle to MathJax 3.2.2 and verifies the exact Git blob identity before use.
@@ -12,8 +12,8 @@ import sys
 import urllib.request
 from pathlib import Path
 
-DEFAULT_URL = "https://raw.githubusercontent.com/mathjax/MathJax/3.2.2/es5/tex-svg.js"
-EXPECTED_GIT_BLOB_SHA1 = "aed2086b6c27920ec2c15399cf6d773b33c892b3"
+DEFAULT_URL = "https://raw.githubusercontent.com/mathjax/MathJax/3.2.2/es5/tex-svg-full.js"
+EXPECTED_GIT_BLOB_SHA1 = "b3388d20a8d2773b001eebd3211ef1a337335d67"
 
 
 def git_blob_sha1(path: Path) -> str:
@@ -27,7 +27,7 @@ def git_blob_sha1(path: Path) -> str:
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--url", default=DEFAULT_URL)
-    p.add_argument("--output", default="vendor/mathjax/tex-svg.js")
+    p.add_argument("--output", default="vendor/mathjax/tex-svg-full.js")
     p.add_argument("--expected-git-blob", default=EXPECTED_GIT_BLOB_SHA1)
     p.add_argument("--force", action="store_true")
     args = p.parse_args()
