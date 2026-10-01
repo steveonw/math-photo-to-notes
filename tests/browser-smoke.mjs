@@ -185,6 +185,13 @@ try{
     assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/output/chtml.js')),'MathJax CHTML output code was not loaded from the local vendor tree');
     assert(localMathJaxRequests.some(x=>/\/vendor\/mathjax\/output\/chtml\/fonts\/woff-v2\/.*\.woff(?:$|\?)/.test(x)),'MathJax CHTML webfont was not loaded from the local vendor tree: '+JSON.stringify(localMathJaxRequests.filter(x=>x.includes('/vendor/mathjax/output/chtml/fonts/'))));
     assert(remoteMathJaxScripts.length===0,'Remote executable MathJax JavaScript was requested: '+JSON.stringify(remoteMathJaxScripts));
+    const mathJaxSourceAudit=await page.evaluate(()=>({
+      hasRemote:document.documentElement.outerHTML.includes('cdn.jsdelivr.net/npm/mathjax'),
+      printSource:String(exportPdfPile)
+    }));
+    assert(mathJaxSourceAudit.hasRemote===false,'Application source still contains remote MathJax executable URLs');
+    assert(mathJaxSourceAudit.printSource.includes("vendor/mathjax/startup.js"),'PDF export no longer points at the self-hosted MathJax startup');
+    assert(!/cdn\.jsdelivr\.net\/npm\/mathjax/i.test(mathJaxSourceAudit.printSource),'PDF export still references remote MathJax');
     await context.close();
   }
 
