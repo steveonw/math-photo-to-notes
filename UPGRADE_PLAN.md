@@ -1747,18 +1747,81 @@ This hardening remains part of Release C's contract and should be regression-pro
 - spot-check data can compare actually verified Good pages with standard Good pages
 - browser smoke tests exercise agreement and disagreement end to end
 
-**Next active release:** Release E — Infrastructure Hardening.
+**Followed by:** Release E — Infrastructure Hardening.
 
 ---
 
 ## Release E — Infrastructure Hardening
 
-1. durable targeted-region queue
-2. project migration framework
-3. expanded regression fixture corpus
-4. self-host MathJax
-5. streaming/compressed large archives
-6. optional image-quality tools based on observed error data
+**Status:** Implemented on 2026-09-30.
+
+Implemented:
+
+1. **Durable targeted-region queue**
+   - targeted region/equation work is represented as explicit durable queue jobs
+   - running targeted-region work serializes as resumable pending work
+   - restored projects resume safely rather than relaunching duplicate hidden requests
+   - region job identity/provider/pass/freshness metadata persists with the queue
+   - targeted work uses the same pause/resume/cancel and interruption rules as whole-page processing
+
+2. **Explicit project-schema migration framework**
+   - current project version is v2
+   - older v1 envelopes are migrated through explicit migration code
+   - migration history is recorded
+   - durable job kinds / targeted-region persistence are normalized during migration
+   - browser regression fixtures cover v1 → v2 migration behavior
+
+3. **Expanded checked-in regression corpus**
+   - `tests/fixtures/browser-regressions.json` carries deterministic cases for repair/classification/validation/High Assurance/page-number/migration behavior
+   - the Chromium smoke suite executes the fixture corpus, not only inline assertions
+
+4. **Self-hosted MathJax**
+   - normal development/browser mode loads MathJax JavaScript and CHTML webfonts from the repository's local `vendor/mathjax` tree
+   - missing `core.js` dependency was identified by the rendered-browser gate and added
+   - PDF/print export no longer uses remote jsDelivr MathJax
+   - CI asserts no remote executable MathJax script is requested
+   - the live preview is verified by waiting for actual rendered `mjx-container` output and local font requests
+
+5. **EquationWright-style single-file offline build**
+   - reused the proven `tex-svg.js` strategy from `steveonw/equationwright`
+   - `scripts/fetch_mathjax.py` fetches MathJax 3.2.2 `tex-svg.js` and verifies the exact pinned Git blob SHA-1 `aed2086b6c27920ec2c15399cf6d773b33c892b3`
+   - `make_offline_build.py` embeds that bundle directly into a single HTML file
+   - the generated offline edition needs no MathJax network request or companion MathJax folder
+   - live preview uses SVG output in the offline edition
+   - PDF/print export detects and reuses the embedded bundle rather than reaching for external assets
+   - CI builds `photo_to_text_OFFLINE.html` and reruns the full Chromium smoke suite against it
+
+6. **Memory-friendlier compressed archive generation**
+   - large archive output uses per-entry compression where supported instead of relying only on a fully concatenated uncompressed ZIP
+   - CompressionStream-backed DEFLATE is used where available
+   - archive progress remains visible to the user
+   - browser tests cover large archive writer behavior
+
+7. **Evidence-driven, non-destructive image review assist**
+   - image-quality evidence can recommend display-only review transforms
+   - available assistance includes non-destructive review presentation such as grayscale/contrast/brightness-style viewing support where warranted
+   - the original image remains authoritative and unchanged
+   - the feature is intentionally review/display assistance rather than automatic evidence mutation
+   - browser regression coverage verifies that recommendations require observable image-quality evidence
+
+8. **Release gate**
+   - regular `photo_to_text.html` Chromium smoke suite passes
+   - pinned MathJax fetch/hash verification passes
+   - one-file offline build passes
+   - full Chromium smoke suite also passes against the generated offline edition
+
+### Acceptance criteria
+
+- targeted-region work is durably resumable
+- old project envelopes have explicit migrations rather than ad-hoc field assumptions
+- checked-in regression fixtures exercise math and migration behavior
+- no runtime path requires third-party MathJax execution
+- a one-file MathJax-capable offline build is reproducible from pinned source
+- large archives have a compressed/memory-aware path
+- image-quality assistance never destroys or silently replaces original evidence
+- both normal and generated offline editions pass browser CI
+
+**Roadmap status:** Releases A–E are complete. Remaining work is evidence-driven maintenance, bug fixes, fixture expansion, and product refinements rather than an invented Release F.
 
 ---
 
