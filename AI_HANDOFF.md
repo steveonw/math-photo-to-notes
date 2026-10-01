@@ -1193,6 +1193,14 @@ Diagnostics should remain action-oriented.
 71. formatting-only math delimiter changes causing false High Assurance disagreement.
 72. a verifier result queued against an older Primary text changing state after the Primary text has since changed.
 73. a High Assurance process batch starting without usable Secondary configuration/credentials.
+74. targeted-region work disappearing or duplicating after reload because it bypasses durable queue persistence.
+75. new project fields being added without an explicit schema migration.
+76. MathJax live preview appearing local while PDF export still executes a remote CDN script.
+77. vendored MathJax component trees omitting `core.js` or another required dependency and silently failing to render.
+78. the one-file offline builder using an unpinned/floating MathJax bundle.
+79. the offline build rendering preview math but requiring companion MathJax files for PDF export.
+80. archive generation regressing to one giant uncompressed in-memory concatenation for large projects.
+81. image-quality assistance mutating the original evidence image instead of remaining non-destructive/display-only.
 
 ---
 
@@ -1311,13 +1319,63 @@ The default user story is:
 - reliability groups separate standard Good pages from High Assurance verified pages
 - Chromium CI covers agreement and sign-level disagreement end to end
 
-### Release E — Infrastructure hardening — next active release
-- durable targeted-region queue jobs
-- explicit project-schema migrations
-- larger checked-in browser regression corpus
-- self-host MathJax
-- memory-efficient/compressed archive support
-- optional image-quality tools if reliability data shows they are worthwhile
+### Release E — Infrastructure hardening — implemented 2026-09-30
+- durable targeted-region queue jobs with resumable persisted region work
+- explicit project v1 → v2 migrations and migration history
+- checked-in deterministic browser regression fixture corpus
+- regular browser MathJax fully self-hosted from `vendor/mathjax`
+- rendered-browser gate verifies local startup/components/webfonts and zero remote executable MathJax
+- PDF/print MathJax is local as well
+- EquationWright-style one-file offline builder using pinned MathJax 3.2.2 `tex-svg.js`
+- fetch helper verifies exact Git blob SHA-1 before building
+- offline PDF path reuses the embedded tex-svg bundle
+- CI runs the complete browser suite against both normal and generated offline HTML
+- compressed/memory-aware large archive writer
+- evidence-driven non-destructive image review assist
+- Releases A–E are complete; future work is maintenance / evidence-driven refinement, not an undefined Release F
+
+# MathJax / Offline Build
+
+Release E has two supported MathJax delivery paths.
+
+## Normal repository/browser mode
+
+`photo_to_text.html` loads MathJax only from the local `vendor/mathjax` component tree.
+
+The rendered-browser test must continue to prove:
+
+- local `startup.js`
+- local core/input/output/extensions
+- local CHTML webfonts
+- actual rendered `mjx-container`
+- zero remote executable MathJax JavaScript
+
+PDF/print export uses the same local repository runtime.
+
+## Single-file offline edition
+
+This follows the proven EquationWright pattern.
+
+1. `python3 scripts/fetch_mathjax.py`
+2. `python3 make_offline_build.py`
+
+The fetch helper pins MathJax 3.2.2 `tex-svg.js` and verifies Git blob SHA-1:
+
+`aed2086b6c27920ec2c15399cf6d773b33c892b3`
+
+The builder injects the full tex-svg engine before the main app script with:
+
+`id="embedded-mathjax-source"`
+
+The normal `ensureMathJax()` path sees an already available MathJax runtime, so no companion files or network are required.
+
+PDF export detects that embedded script source and injects the same bundle into the print window, avoiding a second external dependency.
+
+CI builds `photo_to_text_OFFLINE.html` and reruns the full browser smoke suite with `APP_FILE=photo_to_text_OFFLINE.html`.
+
+Do not weaken the hash verification or replace the pinned bundle with a floating MathJax URL.
+
+---
 
 # High Assurance Math
 
