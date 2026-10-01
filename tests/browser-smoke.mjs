@@ -39,7 +39,9 @@ await new Promise((resolve,reject)=>{
 });
 
 const browser=await chromium.launch({headless:true});
-const appUrl='http://'+host+':'+port+'/photo_to_text.html';
+const appFile=process.env.APP_FILE||'photo_to_text.html';
+const offlineMode=/OFFLINE/i.test(appFile);
+const appUrl='http://'+host+':'+port+'/'+appFile;
 const mathResponse='The derivative of $x^2$ is $2x$, and this sentence contains enough ordinary words for a good classification.';
 let anthropicResponse=mathResponse;
 let anthropicResponses=[];
@@ -179,19 +181,28 @@ try{
     assert(item.badge==='Good','Expected Good math transcription, got '+item.badge+' / '+item.reason);
     assert(item.final.includes('$x^2$')&&item.final.includes('$2x$'),'Math was not preserved in final text');
     assert(item.raw.includes('$x^2$')&&item.raw.includes('$2x$'),'Raw provider result was not preserved');
-    await page.locator('.previewpane mjx-container').first().waitFor({state:'attached',timeout:8000});
+    await page.locator('.previewpane mjx-container').first().waitFor({state:'attached',timeout:10000});
     await page.waitForTimeout(250);
-    assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/startup.js')),'MathJax startup was not loaded from the local vendor tree');
-    assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/output/chtml.js')),'MathJax CHTML output code was not loaded from the local vendor tree');
-    assert(localMathJaxRequests.some(x=>/\/vendor\/mathjax\/output\/chtml\/fonts\/woff-v2\/.*\.woff(?:$|\?)/.test(x)),'MathJax CHTML webfont was not loaded from the local vendor tree: '+JSON.stringify(localMathJaxRequests.filter(x=>x.includes('/vendor/mathjax/output/chtml/fonts/'))));
     assert(remoteMathJaxScripts.length===0,'Remote executable MathJax JavaScript was requested: '+JSON.stringify(remoteMathJaxScripts));
     const mathJaxSourceAudit=await page.evaluate(()=>({
       hasRemote:document.documentElement.outerHTML.includes('cdn.jsdelivr.net/npm/mathjax'),
-      printSource:String(exportPdfPile)
+      printSource:String(exportPdfPile),
+      embedded:!!document.getElementById('embedded-mathjax-source'),
+      renderedSvg:!!document.querySelector('.previewpane mjx-container svg')
     }));
     assert(mathJaxSourceAudit.hasRemote===false,'Application source still contains remote MathJax executable URLs');
-    assert(mathJaxSourceAudit.printSource.includes("vendor/mathjax/startup.js"),'PDF export no longer points at the self-hosted MathJax startup');
     assert(!/cdn\.jsdelivr\.net\/npm\/mathjax/i.test(mathJaxSourceAudit.printSource),'PDF export still references remote MathJax');
+    if(offlineMode){
+      assert(mathJaxSourceAudit.embedded===true,'Offline build is missing embedded tex-svg MathJax source');
+      assert(mathJaxSourceAudit.renderedSvg===true,'Offline build did not render MathJax through SVG output');
+      assert(localMathJaxRequests.length===0,'Offline build unexpectedly requested companion MathJax files: '+JSON.stringify(localMathJaxRequests));
+      assert(mathJaxSourceAudit.printSource.includes('embedded-mathjax-source'),'Offline PDF export does not reuse the embedded MathJax source');
+    }else{
+      assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/startup.js')),'MathJax startup was not loaded from the local vendor tree');
+      assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/output/chtml.js')),'MathJax CHTML output code was not loaded from the local vendor tree');
+      assert(localMathJaxRequests.some(x=>/\/vendor\/mathjax\/output\/chtml\/fonts\/woff-v2\/.*\.woff(?:$|\?)/.test(x)),'MathJax CHTML webfont was not loaded from the local vendor tree: '+JSON.stringify(localMathJaxRequests.filter(x=>x.includes('/vendor/mathjax/output/chtml/fonts/'))));
+      assert(mathJaxSourceAudit.printSource.includes("vendor/mathjax/startup.js"),'PDF export no longer points at the self-hosted MathJax startup fallback');
+    }
     await context.close();
   }
 
