@@ -1699,10 +1699,7 @@ function ensureMathJax(){
      packages:{'[+]':['ams','newcommand','noundefined']}
    },
    chtml:{
-     // Executable MathJax JavaScript is vendored locally. WOFF files remain a
-     // non-executable CDN dependency because GitHub's text-only editor cannot
-     // commit binary font assets in this workflow.
-     fontURL:'https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/output/chtml/fonts/woff-v2'
+     fontURL:'./vendor/mathjax/output/chtml/fonts/woff-v2'
    },
    options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}
  };
@@ -2751,7 +2748,7 @@ async function runDoctor(){
    ['Automatic routing',autoRoutingEnabled()?'Enabled, max '+autoMaxAttempts()+', '+autoCachePolicy():'Disabled'],
    ['High Assurance',highAssuranceEnabled()?'Enabled · '+highAssurancePolicyLabel()+' · Secondary verifier'+((p.provider===s.provider&&p.model===s.model)?' (same provider/model, independent call)':''):'Disabled'],
    ['High Assurance results',(()=>{const checks=state.items.flatMap(i=>i.highAssuranceChecks||[]);return checks.filter(x=>x.outcome==='verified').length+' verified / '+checks.filter(x=>x.outcome==='review').length+' review / '+checks.filter(x=>x.outcome==='failed').length+' failed'})()],
-   ['MathJax runtime','Local vendored JavaScript · remote dependency limited to non-executable WOFF fonts'],
+   ['MathJax runtime','Fully local vendored JavaScript + CHTML webfonts (MathJax 3.2.2)'],
    ['Archive compression',typeof CompressionStream==='function'?'Per-entry deflate enabled when it reduces size':'Store-only compatibility fallback'],
    ['Image review assist',(()=>{const ev=imageQualityEvidence();return (imageAssistEnabled()?'Enabled':'Disabled')+' · '+ev.imageErrors+' image-quality findings / '+ev.errors+' human-found errors'+(ev.recommended?' · evidence threshold met':'')})()],
    ['Durable queue',state.queuePlan?(state.queuePaused?'Paused / resumable':'Active'):'Idle'],
