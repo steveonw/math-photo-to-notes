@@ -14,7 +14,8 @@ const types={
   '.html':'text/html; charset=utf-8',
   '.js':'text/javascript; charset=utf-8',
   '.json':'application/json; charset=utf-8',
-  '.md':'text/markdown; charset=utf-8'
+  '.md':'text/markdown; charset=utf-8',
+  '.woff':'font/woff'
 };
 
 const server=http.createServer(async(req,res)=>{
@@ -51,6 +52,13 @@ function assert(ok,message){if(!ok)throw new Error(message)}
 async function newPage(){
   const context=await browser.newContext();
   const page=await context.newPage();
+  const remoteMathJaxScripts=[];
+  const localMathJaxRequests=[];
+  page.on('request',request=>{
+    const url=request.url();
+    if(url.includes('/vendor/mathjax/'))localMathJaxRequests.push(url);
+    if(url.includes('cdn.jsdelivr.net')&&/\.js(?:$|\?)/.test(url))remoteMathJaxScripts.push(url);
+  });
 
   await page.route('https://cdn.jsdelivr.net/**/tex-mml-chtml.js',route=>route.fulfill({
     status:200,
@@ -87,7 +95,7 @@ async function newPage(){
     document.getElementById('apikey').value='test-key';
     document.getElementById('auto-routing').checked=false;
   });
-  return {context,page};
+  return {context,page,remoteMathJaxScripts,localMathJaxRequests};
 }
 
 async function addFixture(page,name='fixture.png'){
@@ -164,13 +172,18 @@ try{
   {
     anthropicResponse=mathResponse;
     anthropicCalls=0;
-    const {context,page}=await newPage();
+    const {context,page,remoteMathJaxScripts,localMathJaxRequests}=await newPage();
     await addFixture(page,'math-fixture.png');
     const item=await processOne(page);
     assert(item.badge!=='Failed','Math transcription was marked Failed: '+JSON.stringify(item));
     assert(item.badge==='Good','Expected Good math transcription, got '+item.badge+' / '+item.reason);
     assert(item.final.includes('$x^2$')&&item.final.includes('$2x$'),'Math was not preserved in final text');
     assert(item.raw.includes('$x^2$')&&item.raw.includes('$2x$'),'Raw provider result was not preserved');
+    await page.waitForFunction(()=>window.MathJax?.typesetPromise,null,{timeout:8000});
+    await page.waitForTimeout(150);
+    assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/startup.js')),'MathJax startup was not loaded from the local vendor tree');
+    assert(localMathJaxRequests.some(x=>x.endsWith('.woff')),'MathJax CHTML webfont was not loaded from the local vendor tree');
+    assert(remoteMathJaxScripts.length===0,'Remote executable MathJax JavaScript was requested: '+JSON.stringify(remoteMathJaxScripts));
     await context.close();
   }
 
