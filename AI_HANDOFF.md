@@ -1514,15 +1514,15 @@ These are two builds of one application, not two independently maintained progra
 
 ## Renderer unification plan
 
-1. **SVG parity** — use pinned MathJax 3.2.2 SVG rendering in the normal live-preview and PDF/print paths as well as the offline build.
-2. **Broader handwritten-math bundle** — evaluate/upgrade Photo to Notes to pinned `tex-svg-full.js` so expected AI/handwriting extension commands do not depend on runtime autoload fetches.
+1. **SVG parity** — completed: pinned MathJax 3.2.2 SVG rendering is used in the normal live-preview and PDF/print paths as well as the offline build.
+2. **Broader handwritten-math bundle** — completed: Photo to Notes now pins MathJax 3.2.2 `tex-svg-full.js` for both normal and offline builds so expected AI/handwriting extension commands are bundled rather than depending on runtime autoload fetches.
 3. **Render-error evidence** — keep MathJax failures non-destructive: preserve source/final text, record the render warning, and route uncertain math to human review rather than guessing a correction.
 4. **Renderer-parity fixtures** — exercise representative ordinary math, extension-heavy math, and deliberately malformed TeX in both normal and offline browser tests.
 5. **Cleanup** — after parity is proven, remove obsolete CHTML-specific configuration/assets and update documentation so there is only one renderer policy to maintain.
 
-### Step 1 status
+### Step 1–2 status
 
-Step 1 switches the regular edition from the local CHTML component/webfont path to the same pinned MathJax 3.2.2 `tex-svg.js` bundle used by the offline build. PDF/print also uses SVG. The old CHTML vendor files are intentionally left in place until the later cleanup step.
+Step 1 switched the regular edition from the local CHTML component/webfont path to SVG. Step 2 then moved both normal and offline editions to the exact pinned MathJax 3.2.2 `tex-svg-full.js` bundle (Git blob `b3388d20a8d2773b001eebd3211ef1a337335d67`). PDF/print reuses the same SVG renderer. Browser smoke coverage verifies an extension command (`\\cancel`) renders without a MathJax error node. The old CHTML and prior `tex-svg.js` vendor files are intentionally left in place until the later cleanup step.
 
 
 # Desired Long-Term Workflow

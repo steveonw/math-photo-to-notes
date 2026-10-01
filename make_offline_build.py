@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Build a single-file offline edition with MathJax tex-svg embedded inline.
+"""Build a single-file offline edition with MathJax tex-svg-full embedded inline.
 
-Adapted from the proven EquationWright offline-build pattern. The normal app
-keeps readable/local development assets; this builder injects the pinned
-tex-svg.js bundle before the main app script so live preview and PDF export can
-reuse the same embedded runtime without network access or companion folders.
+Uses an EquationWright-inspired single-file packaging approach, but Photo to Notes
+intentionally embeds the broader pinned tex-svg-full.js bundle. The normal app loads
+that same local bundle; this builder injects it before the main app script so live
+preview and PDF export reuse the same runtime without network access or companion folders.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import re
 import sys
 from pathlib import Path
 
-EXPECTED_GIT_BLOB_SHA1 = "aed2086b6c27920ec2c15399cf6d773b33c892b3"
+EXPECTED_GIT_BLOB_SHA1 = "b3388d20a8d2773b001eebd3211ef1a337335d67"
 MAIN_SCRIPT_MARKER = "<script>\nconst PROVIDERS"
 
 
@@ -28,7 +28,7 @@ def git_blob_sha1_bytes(data: bytes) -> str:
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("app", nargs="?", default="photo_to_text.html")
-    p.add_argument("mathjax", nargs="?", default="vendor/mathjax/tex-svg.js")
+    p.add_argument("mathjax", nargs="?", default="vendor/mathjax/tex-svg-full.js")
     p.add_argument("--output")
     p.add_argument("--skip-hash-check", action="store_true")
     args = p.parse_args()
@@ -84,7 +84,7 @@ window.MathJax={
     embedded = (
         config
         + '<script id="embedded-mathjax-source">\n'
-        + "/* MathJax 3.2.2 tex-svg EMBEDDED for the offline edition. */\n"
+        + "/* MathJax 3.2.2 tex-svg-full EMBEDDED for the offline edition. */\n"
         + bundle
         + "\n</script>\n"
     )

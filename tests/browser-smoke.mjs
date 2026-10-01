@@ -191,6 +191,27 @@ try{
       renderedSvg:!!document.querySelector('.previewpane mjx-container svg')
     }));
     assert(mathJaxSourceAudit.hasRemote===false,'Application source still contains remote MathJax executable URLs');
+    const extensionAudit=await page.evaluate(async()=>{
+      const host=document.createElement('div');
+      host.id='mathjax-full-extension-smoke';
+      host.textContent='$\\\\cancel{x}$';
+      document.body.appendChild(host);
+      try{
+        if(window.MathJax?.typesetPromise)await window.MathJax.typesetPromise([host]);
+        return {
+          renderedSvg:!!host.querySelector('mjx-container svg'),
+          hasMerror:!!host.querySelector('mjx-merror,[data-mml-node="merror"]'),
+          text:host.textContent||''
+        };
+      }finally{
+        if(window.MathJax?.typesetClear)window.MathJax.typesetClear([host]);
+        host.remove();
+      }
+    });
+    assert(extensionAudit.renderedSvg===true,'tex-svg-full did not render \\cancel through SVG: '+JSON.stringify(extensionAudit));
+    assert(extensionAudit.hasMerror===false,'tex-svg-full produced a MathJax error node for \\cancel: '+JSON.stringify(extensionAudit));
+    assert(!localMathJaxRequests.some(x=>/extensions\/cancel\.js(?:$|\?)/.test(x)),'tex-svg-full unexpectedly fetched the cancel extension separately: '+JSON.stringify(localMathJaxRequests));
+
     assert(!/cdn\.jsdelivr\.net\/npm\/mathjax/i.test(mathJaxSourceAudit.printSource),'PDF export still references remote MathJax');
     if(offlineMode){
       assert(mathJaxSourceAudit.embedded===true,'Offline build is missing embedded tex-svg MathJax source');
@@ -199,10 +220,10 @@ try{
       assert(mathJaxSourceAudit.printSource.includes('embedded-mathjax-source'),'Offline PDF export does not reuse the embedded MathJax source');
     }else{
       assert(mathJaxSourceAudit.renderedSvg===true,'Normal build did not render MathJax through SVG output');
-      assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/tex-svg.js')),'Pinned MathJax tex-svg bundle was not loaded from the local vendor tree');
+      assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/tex-svg-full.js')),'Pinned MathJax tex-svg-full bundle was not loaded from the local vendor tree');
       assert(!localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/output/chtml')),'Normal build unexpectedly loaded CHTML output assets: '+JSON.stringify(localMathJaxRequests));
       assert(!localMathJaxRequests.some(x=>/\/vendor\/mathjax\/output\/chtml\/fonts\//.test(x)),'Normal build unexpectedly loaded CHTML webfonts: '+JSON.stringify(localMathJaxRequests));
-      assert(mathJaxSourceAudit.printSource.includes("vendor/mathjax/tex-svg.js"),'PDF export no longer points at the pinned local tex-svg bundle');
+      assert(mathJaxSourceAudit.printSource.includes("vendor/mathjax/tex-svg-full.js"),'PDF export no longer points at the pinned local tex-svg-full bundle');
     }
     await context.close();
   }
