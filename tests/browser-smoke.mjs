@@ -60,7 +60,6 @@ assert(mathJaxGitBlobSha===EXPECTED_MATHJAX_GIT_BLOB_SHA1,'Vendored MathJax blob
 
 async function newPage(){
   const context=await browser.newContext();
-  await context.addInitScript(()=>{window.print=()=>{window.__mathPhotoPrintCalled=true}});
   const remoteMathJaxScripts=[];
   const localMathJaxRequests=[];
   context.on('request',request=>{
@@ -268,6 +267,15 @@ try{
     }
 
     // Exercise the actual PDF/print window, not only exportPdfPile source text.
+    // Neutralize the native print dialog at popup creation time so headless Chromium can inspect the rendered document.
+    await page.evaluate(()=>{
+      const realOpen=window.open.bind(window);
+      window.open=(...args)=>{
+        const w=realOpen(...args);
+        if(w)w.print=()=>{w.__mathPhotoPrintCalled=true};
+        return w;
+      };
+    });
     const popupPromise=page.waitForEvent('popup');
     await page.evaluate(()=>exportPdfPile([
       {name:'renderer-parity.pdf-fixture',text:'$\\frac{1}{2}+\\cancel{x}$',classification:'good',metadata:{},documentId:''}
