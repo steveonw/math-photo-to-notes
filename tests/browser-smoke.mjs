@@ -179,10 +179,11 @@ try{
     assert(item.badge==='Good','Expected Good math transcription, got '+item.badge+' / '+item.reason);
     assert(item.final.includes('$x^2$')&&item.final.includes('$2x$'),'Math was not preserved in final text');
     assert(item.raw.includes('$x^2$')&&item.raw.includes('$2x$'),'Raw provider result was not preserved');
-    await page.waitForFunction(()=>window.MathJax?.typesetPromise,null,{timeout:8000});
-    await page.waitForTimeout(150);
+    await page.locator('.previewpane mjx-container').first().waitFor({state:'attached',timeout:8000});
+    await page.waitForTimeout(250);
     assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/startup.js')),'MathJax startup was not loaded from the local vendor tree');
-    assert(localMathJaxRequests.some(x=>x.endsWith('.woff')),'MathJax CHTML webfont was not loaded from the local vendor tree');
+    assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/output/chtml.js')),'MathJax CHTML output code was not loaded from the local vendor tree');
+    assert(localMathJaxRequests.some(x=>/\/vendor\/mathjax\/output\/chtml\/fonts\/woff-v2\/.*\.woff(?:$|\?)/.test(x)),'MathJax CHTML webfont was not loaded from the local vendor tree: '+JSON.stringify(localMathJaxRequests.filter(x=>x.includes('/vendor/mathjax/output/chtml/fonts/'))));
     assert(remoteMathJaxScripts.length===0,'Remote executable MathJax JavaScript was requested: '+JSON.stringify(remoteMathJaxScripts));
     await context.close();
   }
