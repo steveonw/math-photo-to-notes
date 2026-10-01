@@ -62,30 +62,12 @@ async function newPage(){
   const context=await browser.newContext();
   const remoteMathJaxScripts=[];
   const localMathJaxRequests=[];
-  const localMathJaxResponses=[];
-  const localMathJaxFinished=[];
-  const localMathJaxFailures=[];
-  const pageErrors=[];
   context.on('request',request=>{
     const url=request.url();
     if(url.includes('/vendor/mathjax/'))localMathJaxRequests.push(url);
     if(url.includes('cdn.jsdelivr.net')&&/\.js(?:$|\?)/.test(url))remoteMathJaxScripts.push(url);
   });
-  context.on('response',response=>{
-    const url=response.url();
-    if(url.includes('/vendor/mathjax/'))localMathJaxResponses.push({url,status:response.status()});
-  });
-  context.on('requestfinished',request=>{
-    const url=request.url();
-    if(url.includes('/vendor/mathjax/'))localMathJaxFinished.push({url,frame:request.frame()?.url?.()||'',type:request.resourceType()});
-  });
-  context.on('requestfailed',request=>{
-    const url=request.url();
-    if(url.includes('/vendor/mathjax/'))localMathJaxFailures.push({url,error:request.failure()?.errorText||''});
-  });
-  context.on('page',p=>p.on('pageerror',e=>pageErrors.push(String(e?.message||e))));
   const page=await context.newPage();
-  page.on('pageerror',e=>pageErrors.push(String(e?.message||e)));
 
   await context.route('https://cdn.jsdelivr.net/**/tex-mml-chtml.js',route=>route.fulfill({
     status:200,
@@ -122,7 +104,7 @@ async function newPage(){
     document.getElementById('apikey').value='test-key';
     document.getElementById('auto-routing').checked=false;
   });
-  return {context,page,remoteMathJaxScripts,localMathJaxRequests,localMathJaxResponses,localMathJaxFinished,localMathJaxFailures,pageErrors};
+  return {context,page,remoteMathJaxScripts,localMathJaxRequests};
 }
 
 async function addFixture(page,name='fixture.png'){
@@ -199,7 +181,7 @@ try{
   {
     anthropicResponse=mathResponse;
     anthropicCalls=0;
-    const {context,page,remoteMathJaxScripts,localMathJaxRequests,localMathJaxResponses,localMathJaxFinished,localMathJaxFailures,pageErrors}=await newPage();
+    const {context,page,remoteMathJaxScripts,localMathJaxRequests}=await newPage();
     await addFixture(page,'math-fixture.png');
     const item=await processOne(page);
     assert(item.badge!=='Failed','Math transcription was marked Failed: '+JSON.stringify(item));
@@ -284,66 +266,53 @@ try{
       for(const blocked of ['html','noundefined','require'])assert(!rendererAudit.packages.includes(blocked),'Live MathJax package policy drifted; blocked package loaded: '+blocked);
     }
 
-    // Exercise the actual PDF/print window, not only exportPdfPile source text.
-    // Neutralize the native print dialog at popup creation time so headless Chromium can inspect the rendered document.
-    await page.evaluate(()=>{
-      const realOpen=window.open.bind(window);
-      window.open=(...args)=>{
-        const w=realOpen(...args);
-        if(w)w.print=()=>{w.__mathPhotoPrintCalled=true};
-        return w;
+    // Exercise the actual print path using the same MathJax runtime as live preview.
+    const printAudit=await page.evaluate(async()=>{
+      const beforeTitle=document.title;
+      window.__mathPhotoPrintAudit=null;
+      window.print=()=>{
+        const root=document.getElementById('math-photo-print-root');
+        window.__mathPhotoPrintAudit={
+          called:true,
+          renderedSvg:!!root?.querySelector('mjx-container svg'),
+          hasMerror:!!root?.querySelector('mjx-merror,[data-mml-node="merror"]'),
+          bodyActive:document.body.classList.contains('math-photo-print-active'),
+          title:document.title,
+          rootText:(root?.innerText||'').slice(0,500),
+          packages:Array.isArray(window.MathJax?.config?.tex?.packages)?[...window.MathJax.config.tex.packages]:window.MathJax?.config?.tex?.packages||null
+        };
+      };
+      await exportPdfPile([
+        {name:'renderer-parity.pdf-fixture',text:'$\\frac{1}{2}+\\cancel{x}$',classification:'good',metadata:{},documentId:''}
+      ],'Renderer parity');
+      return {
+        audit:window.__mathPhotoPrintAudit,
+        cleanedRoot:!document.getElementById('math-photo-print-root'),
+        cleanedStyle:!document.getElementById('math-photo-print-style'),
+        cleanedClass:!document.body.classList.contains('math-photo-print-active'),
+        restoredTitle:document.title===beforeTitle
       };
     });
-    const popupPromise=page.waitForEvent('popup');
-    await page.evaluate(()=>exportPdfPile([
-      {name:'renderer-parity.pdf-fixture',text:'$\\frac{1}{2}+\\cancel{x}$',classification:'good',metadata:{},documentId:''}
-    ],'Renderer parity'));
-    const printPage=await popupPromise;
-    try{
-      await printPage.waitForFunction(
-        ()=>document.readyState==='complete'&&typeof window.MathJax?.typesetPromise==='function'&&!!document.querySelector('mjx-container svg'),
-        null,{timeout:10000}
-      );
-    }catch(e){}
-    const printAudit=await printPage.evaluate(()=>({
-      renderedSvg:!!document.querySelector('mjx-container svg'),
-      hasMerror:!!document.querySelector('mjx-merror,[data-mml-node="merror"]'),
-      packages:Array.isArray(window.MathJax?.config?.tex?.packages)?[...window.MathJax.config.tex.packages]:window.MathJax?.config?.tex?.packages||null,
-      scriptSrcs:[...document.scripts].map(x=>x.src).filter(Boolean),
-      scriptCount:document.scripts.length,
-      embeddedSource:document.documentElement.innerHTML.includes('MathJax 3.2.2 tex-svg-full EMBEDDED'),
-      printCalled:window.__mathPhotoPrintCalled===true,
-      readyState:document.readyState,
-      mathJaxKeys:window.MathJax?Object.keys(window.MathJax).sort():[],
-      startupPromise:!!window.MathJax?.startup?.promise,
-      typesetPromise:typeof window.MathJax?.typesetPromise==='function',
-      bodyText:(document.body?.innerText||'').slice(0,500),
-      htmlHead:(document.documentElement?.outerHTML||'').slice(0,1200)
-    }));
-    assert(printAudit.renderedSvg===true&&printAudit.hasMerror===false,'PDF/print path did not render clean SVG: '+JSON.stringify({printAudit,localMathJaxRequests,localMathJaxResponses,localMathJaxFinished,localMathJaxFailures,pageErrors}));
-    assert(printAudit.printCalled===true,'PDF/print path did not reach the print-ready state');
-    if(Array.isArray(printAudit.packages)){
-      for(const blocked of ['html','noundefined','require'])assert(!printAudit.packages.includes(blocked),'PDF MathJax package policy drifted; blocked package loaded: '+blocked);
+    assert(printAudit.audit?.called===true,'PDF/print path did not invoke window.print: '+JSON.stringify(printAudit));
+    assert(printAudit.audit.renderedSvg===true&&printAudit.audit.hasMerror===false,'PDF/print staging did not render clean SVG: '+JSON.stringify(printAudit));
+    assert(printAudit.audit.bodyActive===true,'Print staging class was not active when print was invoked');
+    assert(printAudit.audit.title==='Renderer parity','Print title was not applied before printing: '+JSON.stringify(printAudit));
+    assert(/renderer-parity\.pdf-fixture/.test(printAudit.audit.rootText),'Print staging did not contain the requested page: '+JSON.stringify(printAudit));
+    if(Array.isArray(printAudit.audit.packages)){
+      for(const blocked of ['html','noundefined','require'])assert(!printAudit.audit.packages.includes(blocked),'PDF MathJax package policy drifted; blocked package loaded: '+blocked);
     }
-    if(offlineMode){
-      assert(printAudit.embeddedSource===true,'Offline PDF/print window did not reuse embedded tex-svg-full source');
-      assert(!printAudit.scriptSrcs.some(x=>x.includes('/vendor/mathjax/')),'Offline PDF/print unexpectedly loaded companion MathJax: '+JSON.stringify(printAudit.scriptSrcs));
-    }else{
-      assert(printAudit.scriptSrcs.some(x=>x.includes('/vendor/mathjax/tex-svg-full.js')),'Normal PDF/print did not load pinned local tex-svg-full: '+JSON.stringify(printAudit.scriptSrcs));
-    }
-    await printPage.close();
-
+    assert(printAudit.cleanedRoot&&printAudit.cleanedStyle&&printAudit.cleanedClass&&printAudit.restoredTitle,'PDF/print staging did not clean up completely: '+JSON.stringify(printAudit));
     assert(!/cdn\.jsdelivr\.net\/npm\/mathjax/i.test(mathJaxSourceAudit.printSource),'PDF export still references remote MathJax');
     if(offlineMode){
       assert(mathJaxSourceAudit.embedded===true,'Offline build is missing embedded tex-svg MathJax source');
       assert(mathJaxSourceAudit.renderedSvg===true,'Offline build did not render MathJax through SVG output');
       assert(localMathJaxRequests.length===0,'Offline build unexpectedly requested companion MathJax files from live or PDF paths: '+JSON.stringify(localMathJaxRequests));
-      assert(mathJaxSourceAudit.printSource.includes('embedded-mathjax-source'),'Offline PDF export does not reuse the embedded MathJax source');
+      assert(mathJaxSourceAudit.printSource.includes('ensureMathJax'),'Offline PDF export no longer reuses the live MathJax runtime');
     }else{
       assert(mathJaxSourceAudit.renderedSvg===true,'Normal build did not render MathJax through SVG output');
       assert(localMathJaxRequests.some(x=>x.includes('/vendor/mathjax/tex-svg-full.js')),'Pinned MathJax tex-svg-full bundle was not loaded from the local vendor tree');
       assert(localMathJaxRequests.every(x=>x.includes('/vendor/mathjax/tex-svg-full.js')),'Normal live/PDF paths requested an unexpected MathJax companion asset: '+JSON.stringify(localMathJaxRequests));
-      assert(mathJaxSourceAudit.printSource.includes("vendor/mathjax/tex-svg-full.js"),'PDF export no longer points at the pinned local tex-svg-full bundle');
+      assert(mathJaxSourceAudit.printSource.includes('ensureMathJax'),'PDF export no longer reuses the live MathJax runtime');
     }
     await context.close();
   }
