@@ -3555,7 +3555,6 @@ function exportPdfPile(list,title){
  const configScript='<script>window.MathJax='+JSON.stringify(printMathJaxConfig).replace(/</g,'\\u003c')+';<\/script>';
  const engineScript=embeddedMathJaxSource?'<script>'+embeddedSafe+'<\/script>':'';
  const mathJaxMarkup=configScript+'\n'+engineScript;
- const pdfMathJaxUrlLiteral=JSON.stringify(embeddedMathJaxSource?'':mathJaxBundleURL).replace(/</g,'\\u003c');
  const w=window.open('','_blank');
  if(!w){alert('The browser blocked the PDF window. Allow pop-ups for this file and try again.');return}
  w.document.open();
@@ -3586,18 +3585,8 @@ function exportPdfPile(list,title){
  <h1>${htmlEscape(title)}</h1>
  ${sections}
  <script>
- (async function(){
+ window.__mathPhotoRenderAndPrint=async function(){
    try{
-     const rendererURL=${pdfMathJaxUrlLiteral};
-     if(typeof window.MathJax?.typesetPromise!=='function'&&rendererURL){
-       await new Promise((resolve,reject)=>{
-         const node=document.createElement('script');
-         node.src=rendererURL;
-         node.onload=resolve;
-         node.onerror=()=>reject(new Error('Local MathJax PDF renderer could not be loaded.'));
-         document.head.appendChild(node);
-       });
-     }
      if(window.MathJax && MathJax.startup && MathJax.startup.promise){
        await MathJax.startup.promise;
      }
@@ -3611,10 +3600,21 @@ function exportPdfPile(list,title){
    }
    try{window.opener=null}catch(e){}
    setTimeout(()=>window.print(),250);
- })();
- <\/script>
+ }; <\/script>
  </body></html>`);
  w.document.close();
+ if(embeddedMathJaxSource){
+   w.__mathPhotoRenderAndPrint();
+ }else{
+   const node=w.document.createElement('script');
+   node.src=mathJaxBundleURL;
+   node.onload=()=>w.__mathPhotoRenderAndPrint();
+   node.onerror=()=>{
+     console.error('Local MathJax PDF renderer could not be loaded.');
+     w.__mathPhotoRenderAndPrint();
+   };
+   w.document.head.appendChild(node);
+ }
 }
 
 
