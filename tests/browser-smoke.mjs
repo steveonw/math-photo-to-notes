@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import crypto from 'node:crypto';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -134,6 +134,26 @@ async function processOne(page){
 }
 
 try{
+  // Verify the distributed HTML can actually be opened from disk without companion files.
+  if(offlineMode){
+    const context=await browser.newContext();
+    const page=await context.newPage();
+    const networkRequests=[],pageErrors=[];
+    context.on('request',req=>{if(!req.url().startsWith('file:'))networkRequests.push(req.url())});
+    page.on('pageerror',error=>pageErrors.push(error.message));
+    await page.goto(pathToFileURL(path.join(root,appFile)).href,{waitUntil:'domcontentloaded'});
+    await page.waitForFunction(()=>typeof window.MathJax?.typesetPromise==='function',null,{timeout:15000});
+    const result=await page.evaluate(()=>({
+      runButton:!!document.querySelector('#run'),
+      embedded:!!document.querySelector('#embedded-mathjax-source'),
+      mathReady:typeof window.MathJax?.typesetPromise==='function'
+    }));
+    assert(result.runButton&&result.embedded&&result.mathReady,'Downloaded file could not initialize: '+JSON.stringify(result));
+    assert(networkRequests.length===0,'Offline file loaded remote resources: '+JSON.stringify(networkRequests));
+    assert(pageErrors.length===0,'Offline file emitted browser errors: '+JSON.stringify(pageErrors));
+    await context.close();
+  }
+
   // Built-in deterministic/browser self-tests must actually execute to completion.
   {
     const {context,page}=await newPage();
@@ -762,6 +782,7 @@ try{
       &&output.restored==='approved'&&output.approvedAt==='2026-10-01T00:00:00Z'
       &&output.historyCount===1,'Smart archive behavior failed: '+JSON.stringify(output));
     await page.reload();
+    await page.waitForFunction(()=>typeof state!=='undefined'&&state.items.length===2,null,{timeout:15000});
     const recovered=await page.evaluate(async()=>({
       items:state.items.length,
       archived:await idbCount(DB_ARCHIVED),

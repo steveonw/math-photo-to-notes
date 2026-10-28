@@ -70,6 +70,11 @@ This produces:
 
 `photo_to_text_OFFLINE.html`
 
+**No Python required to download:** open the repository's [Browser smoke tests workflow](https://github.com/steveonw/math-photo-to-notes/actions/workflows/browser-smoke.yml), select the latest successful run on your preferred branch, then download the `math-photo-to-notes-offline` artifact. Unzip it and open `photo_to_text_OFFLINE.html` in a modern browser. GitHub retains this downloadable build artifact for 90 days.
+
+This is an **offline-capable editor and math renderer**, not an on-device OCR model: transcribing *new* photos through an AI provider still requires a network connection and API key. Existing locally saved project data and manual review can be used without calling a provider.
+
+
 The fetch helper pins MathJax 3.2.2 `tex-svg-full.js` and verifies the exact Git blob SHA before the builder embeds it. The generated file needs no MathJax network request or companion MathJax folder. Live preview uses embedded SVG MathJax, and PDF/print export reuses the same embedded engine. TeX is treated as untrusted input: HTML/require-style MathJax features are disabled, malformed or undefined TeX is surfaced for review, and the original transcription text is preserved. The vendored renderer tree is intentionally minimal: `LICENSE` plus the single pinned `tex-svg-full.js` bundle.
 
 ## Testing

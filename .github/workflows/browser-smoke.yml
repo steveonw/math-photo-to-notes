@@ -35,3 +35,11 @@ jobs:
 
       - name: Run browser smoke tests against offline edition
         run: APP_FILE=photo_to_text_OFFLINE.html node tests/browser-smoke.mjs
+
+      - name: Upload tested standalone offline HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: math-photo-to-notes-offline
+          path: photo_to_text_OFFLINE.html
+          if-no-files-found: error
+          retention-days: 90
