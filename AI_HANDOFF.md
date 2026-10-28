@@ -1564,3 +1564,14 @@ Each upgrade should:
 8. update this handoff and the upgrade plan when architecture changes materially
 9. run the browser smoke suite for any change touching transcription, math repair/validation, provider adapters, routing, persistence, or export
 10. treat JavaScript parse success as only a preliminary check; the normal math happy path must execute in a browser
+
+
+# Smart Archive & Cache Cleanup — 2026-10-27
+
+A new optional archival workflow in `photo_to_text.html` is implemented on a feature branch pending CI review. IndexedDB version 3 adds `archivedPages` and `processedPhotoIndex` stores. Archive entries retain original image data, raw/repaired/final transcripts, complete page state, revision/provenance/approval lineage and document reference. The SHA-256 index points to record IDs and is updated in the same IndexedDB transaction as archive writes; restore verifies image bytes and final-text hash against the record before reuse. Failed/missing fingerprint checks never license an automatic skip.
+
+Import-time dedup is byte-exact. Already-loaded and within-batch duplicates are skipped, verifiable Approved archived pages are skipped, and non-Approved completed pages can be restored into the active workspace with review flags and obligations preserved. Conflicting archived text versions are not automatically selected. The feature does not guess near-duplicate identities.
+
+**Cleanup invariants:** Work must be idle. Archive and verify eligible completed pages before requesting the portable ZIP backup; enable destructive cleanup only after this succeeds. User must confirm the ZIP is saved and located. Recheck unchanged page text/classification/image hash and archived records before removal. Clear only the ephemeral `cache` object store, not `archivedPages`, `processedPhotoIndex` or the global reliability ledger. Do not delete uncompleted or image-less pages. The existing Clear all button keeps its old meaning. Browser storage eviction remains possible; external backup is strongly recommended.
+
+`tests/browser-smoke.mjs` now includes the archive/cache/dedup/reload regression. The normal and generated-offline test suites remain release gates.

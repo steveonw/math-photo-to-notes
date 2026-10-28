@@ -730,6 +730,50 @@ try{
     await context.close();
   }
 
+  // Smart archive: cache deletion must not erase reviewed evidence.
+  {
+    const {context,page}=await newPage();
+    await addFixture(page,'smart-archive.png');
+    const output=await page.evaluate(async()=>{
+      const item=state.items[0];
+      item.rawText='A previously reviewed mathematical note.';
+      item.repairedText=item.rawText;item.finalText=item.rawText;item.text=item.rawText;
+      item.status='done';item.classification='approved';item.approvalAt='2026-10-01T00:00:00Z';
+      item.history=[{finalText:'Earlier version',classification:'review'}];
+      await saveProjectState();
+      const record=await storeArchivedPage(item);
+      const verified=(await archivedMatches(item.imageHash)).some(x=>x.recordId===record.recordId);
+      await idbPut(DB_CACHE,'fixture-cache',{rawText:'temporary'});
+      await idbClear(DB_CACHE);
+      const cacheCount=await idbCount(DB_CACHE);
+      const same=new File([await item.file.arrayBuffer()],'other-name.png',{type:'image/png'});
+      state.items=[];
+      await addFiles([same]);
+      const skipped=state.items.length===0;
+      const different=new File([new Uint8Array([4,3,2,1])],'smart-archive.png',{type:'image/png'});
+      await addFiles([different]);
+      const isNew=state.items.length===1;
+      const restored=restoreArchivedPage((await archivedMatches(item.imageHash))[0]);
+      await saveProjectState();
+      return {verified,cacheCount,skipped,isNew,restored:restored.classification,
+        approvedAt:restored.approvalAt,historyCount:restored.history.length};
+    });
+    assert(output.verified&&output.cacheCount===0&&output.skipped&&output.isNew
+      &&output.restored==='approved'&&output.approvedAt==='2026-10-01T00:00:00Z'
+      &&output.historyCount===1,'Smart archive behavior failed: '+JSON.stringify(output));
+    await page.reload();
+    const recovered=await page.evaluate(async()=>({
+      items:state.items.length,
+      archived:await idbCount(DB_ARCHIVED),
+      index:await idbCount(DB_PROCESSED),
+      approved:state.items.find(x=>x.classification==='approved')?.approvalAt||''
+    }));
+    assert(recovered.items===2&&recovered.archived>=1&&recovered.index>=1
+      &&recovered.approved==='2026-10-01T00:00:00Z',
+      'Smart archive reload failed: '+JSON.stringify(recovered));
+    await context.close();
+  }
+
   // Gemini auth must use a header, not a query-string key.
   {
     const {context,page}=await newPage();
