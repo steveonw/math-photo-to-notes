@@ -762,6 +762,7 @@ try{
       &&output.restored==='approved'&&output.approvedAt==='2026-10-01T00:00:00Z'
       &&output.historyCount===1,'Smart archive behavior failed: '+JSON.stringify(output));
     await page.reload();
+    await page.waitForFunction(()=>typeof state!=='undefined'&&state.items.length===2,null,{timeout:15000});
     const recovered=await page.evaluate(async()=>({
       items:state.items.length,
       archived:await idbCount(DB_ARCHIVED),
