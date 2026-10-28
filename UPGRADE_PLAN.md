@@ -1951,3 +1951,11 @@ The repository now keeps only `vendor/mathjax/LICENSE` and pinned `vendor/mathja
 
 **Renderer-unification maintenance status:** Steps 1–6 are complete.
 
+
+# Smart Archive & Duplicate Import — Maintenance Feature (2026-10-27)
+
+This is an incremental reliability/product maintenance improvement, not a numbered upgrade. User configuration: archive completed pages on demand; retain a SHA-256 processed-image index; clear disposable AI response cache only after a verified archive and user-confirmed ZIP backup.
+
+Implementation: IndexedDB v3 stores `archivedPages` and `processedPhotoIndex`; the active project and human spot-check ledger remain separate from AI response cache. Import compares original image SHA-256 digests to current/batch images and archived snapshots, skipping only verifiable exact Approved repeats automatically. Incomplete and uncertain reviews cannot become Approved by reuse. Restore preserves full approval/revision/provenance lineage. Hash mismatches, conflicts and unavailable archives are not silently skipped. The cleanup process gates cache clearing and removal of unchanged completed project pages behind local archive verification, ZIP download initiation, and explicit confirmation that the backup was saved.
+
+Acceptance: byte-identical renamed file skipped; same filename/different bytes accepted; reviewed history retained through cache clear/reload; IndexedDB upgrades without data loss; no destructive behavior on active queues, missing images, failed verification or backup cancellation; normal/offline Chromium smoke tests pass. Browser storage is not a durable external backup.
