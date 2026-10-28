@@ -114,3 +114,11 @@ A successful provider response must be preserved before any local repair, valida
 ## Status
 
 The numbered Upgrade 1–10 roadmap and Releases A–E are complete. Current work is evidence-driven maintenance, regression expansion, bug fixing, and product refinement rather than a new numbered release. The MathJax renderer-unification maintenance plan (SVG parity, `tex-svg-full`, untrusted-TeX handling, renderer corpus, parity gates, and legacy cleanup) is complete.
+
+## Smart archive and exact-photo duplicate prevention
+
+The optional **Archive completed + download backup** action saves completed pages, including original images, revisions, approval state, flags and provenance, into IndexedDB's `archivedPages` store and a compact SHA-256 `processedPhotoIndex`. After verification, the app requests a portable ZIP backup download. **Confirm backup saved + clean workspace/cache** is deliberately a separate manual step: it asks the user to confirm they have located the downloaded ZIP, then removes only unchanged archived completed pages from the workspace and clears the disposable AI-response `cache` store. The spot-check reliability ledger and archived records remain. Browser storage is not a substitute for an external backup.
+
+On import, exact byte-identical photos already loaded in the workspace or current batch are skipped. An exact match against a verifiable Approved archived record is skipped without AI or reapproval. Archived non-Approved results are restored with their review obligations and provenance; a conflicting archived history, a missing archive, or an unhashable image must not be silently treated as approved. Changed-image bytes, even with the same filename, are new images. Reimporting the image is a way to recover archived work, and existing **Open Project** can restore the `project.json` contained in a completed ZIP.
+
+The implementation does not use perceptual hashes or silently merge recompressed images. A fresh retry remains available for active pages. No API keys are stored in archives, and the existing **Clear all** button remains distinct from safe archive/cleanup.
