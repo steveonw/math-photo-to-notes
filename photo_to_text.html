@@ -844,11 +844,34 @@ els.provider2.addEventListener('change',()=>syncProvider(2,true));
 $('auto-routing')?.addEventListener('change',()=>{if(!autoRoutingEnabled())cancelPendingAutoRoutes()});
 
 async function addFiles(list){
- const files=[...list].filter(f=>f.type.startsWith('image/'));
- for(let i=0;i<files.length;i++){
-   const f=files[i];
-   let imageData='';
-   try{imageData=await dataURL(f)}catch(e){}
+  const files=[...list].filter(f=>f.type.startsWith('image/'));
+  const result={new:0,skipped:0,restored:0,conflicts:0,warnings:0};
+  const seen=new Set();
+  const loaded=new Set(state.items.map(i=>i.imageHash).filter(Boolean));
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    let hash='';
+    try{hash=await imageHashForFile(f)}catch(e){result.warnings++}
+    if(hash&&(seen.has(hash)||loaded.has(hash))){result.skipped++;continue}
+    if(hash)seen.add(hash);
+    let archived=[];
+    if(hash)try{archived=await archivedMatches(hash)}catch(e){result.warnings++}
+    if(archived.length){
+      const versions=new Set(archived.map(x=>x.finalTextHash));
+      if(versions.size>1)result.conflicts++;
+      else{
+        const rec=archived.sort((a,b)=>String(b.archivedAt).localeCompare(String(a.archivedAt)))[0];
+        if(rec.page.classification==='approved'&&!rec.page.needsReapproval&&!rec.page.needsRefresh){
+          result.skipped++;continue;
+        }
+        if(rec.page.status==='done'&&!['failed','interrupted'].includes(rec.page.classification)
+          &&!state.items.some(i=>i.id===rec.page.id)){
+          restoreArchivedPage(rec);result.restored++;loaded.add(hash);continue;
+        }
+      }
+    }
+    let imageData='';
+    try{imageData=await dataURL(f)}catch(e){result.warnings++}
    state.items.push({
      id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+i+'-'+Math.random(),
      file:f,name:f.name,size:f.size,url:imageData||URL.createObjectURL(f),imageData,
@@ -864,11 +887,13 @@ async function addFiles(list){
      pageNumberSuggestion:null,dismissedPageSuggestion:'',
      routingHistory:[],autoRoutingNote:'',highAssuranceChecks:[],highAssuranceStatus:'',highAssuranceNote:'',highAssuranceAttempts:0,regions:[],needsRefresh:false,preRefreshClassification:'',preRefreshReason:'',lastFailureStatus:0,postProcessingError:false,usageLog:[],externalCorrections:[]
    });
-   try{state.items[state.items.length-1].imageHash=await imageHashForFile(f)}catch(e){}
-   refreshPageNumberSuggestion(state.items[state.items.length-1]);
 
- }
- scheduleAutosave(); render();
+    refreshPageNumberSuggestion(state.items[state.items.length-1]);
+    if(hash)loaded.add(hash);
+    result.new++;
+  }
+  scheduleAutosave();render();
+  showSmartReport('smart-import-report','Import: '+result.new+' new, '+result.skipped+' exact duplicates skipped, '+result.restored+' restored for review, '+result.conflicts+' conflicting archive records imported for review'+(result.warnings?' ('+result.warnings+' hash/storage warnings)':'')+'.');
 }
 els.drop.onclick=()=>els.files.click();
 els.files.onchange=e=>addFiles(e.target.files);
