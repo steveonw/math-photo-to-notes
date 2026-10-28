@@ -57,6 +57,7 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
   <h1>Math Photo to Notes</h1>
   <div class="sub">Upload note photos, run <b>Quick Transcribe</b>, and let the app sort pages into review piles. Turn on <b>Auto-fix flagged pages</b> only when you want bounded second-pass AI work. <b>Good</b> means no automatic warning signals were detected; it does not mean the page was independently verified.</div>
 
+  <div id="smart-import-report" class="reason hidden" role="status" aria-live="polite"></div>
   <div class="stats">
     <div class="stat"><span>Images</span><b id="s-total">0</b></div>
     <div class="stat"><span>Good</span><b id="s-good">0</b></div>
@@ -220,6 +221,10 @@ button{padding:10px 13px;border:1px solid #d4d4d8;background:white;border-radius
     <button id="open-project">Open Project</button>
     <input id="open-project-file" type="file" accept=".json,application/json" class="hidden">
     <button id="archive-project">Archive Project .zip</button>
+    <button id="smart-archive">Archive completed + download backup</button>
+    <button id="smart-cleanup" disabled>Confirm backup saved + clean workspace/cache</button>
+    <button id="smart-archive-browser">Archived pages</button>
+    <div id="smart-archive-report" class="reason hidden" role="status" aria-live="polite"></div>
     <button id="download-txt">Plain text</button>
     <button id="download-tex">LaTeX .tex</button>
     <button id="usage-report">Usage report .json</button>
@@ -325,10 +330,13 @@ const AUTOSAVE_KEY='math_photo_to_notes_phase_a_v1';
 const PROJECT_SCHEMA='math-photo-notes-project-v1';
 const CURRENT_PROJECT_VERSION=2;
 const DB_NAME='math-photo-to-notes';
-const DB_VERSION=2;
+const DB_VERSION=3;
 const DB_PROJECTS='projects';
 const DB_CACHE='cache';
 const DB_RELIABILITY='reliability';
+const DB_ARCHIVED='archivedPages';
+const DB_PROCESSED='processedPhotoIndex';
+let pendingSmartCleanup=null;
 const RELIABILITY_LEDGER_KEY='spot-check-ledger-v1';
 const REQUEST_TIMEOUT_MS=90000;
 const MAX_TRANSIENT_RETRIES=3;
@@ -355,6 +363,8 @@ function openProjectDB(){
      if(!db.objectStoreNames.contains(DB_PROJECTS))db.createObjectStore(DB_PROJECTS);
      if(!db.objectStoreNames.contains(DB_CACHE))db.createObjectStore(DB_CACHE);
      if(!db.objectStoreNames.contains(DB_RELIABILITY))db.createObjectStore(DB_RELIABILITY);
+      if(!db.objectStoreNames.contains(DB_ARCHIVED))db.createObjectStore(DB_ARCHIVED);
+      if(!db.objectStoreNames.contains(DB_PROCESSED))db.createObjectStore(DB_PROCESSED);
    };
    req.onsuccess=()=>resolve(req.result);
    req.onerror=()=>reject(req.error||new Error('IndexedDB open failed'));
@@ -394,6 +404,84 @@ async function idbCount(store){
    req.onsuccess=()=>resolve(req.result||0);req.onerror=()=>reject(req.error);
    tx.oncomplete=()=>db.close();
  });
+}
+async function idbClear(store){
+  const db=await openProjectDB();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(store,'readwrite');
+    tx.objectStore(store).clear();
+    tx.oncomplete=()=>{db.close();resolve()};
+    tx.onerror=()=>{db.close();reject(tx.error)};
+    tx.onabort=()=>{db.close();reject(tx.error||new Error('Storage transaction aborted'))};
+  });
+}
+async function idbGetAll(store){
+  const db=await openProjectDB();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(store,'readonly'),req=tx.objectStore(store).getAll();
+    req.onsuccess=()=>resolve(req.result||[]);
+    req.onerror=()=>reject(req.error);
+    tx.oncomplete=()=>db.close();
+  });
+}
+// Archive and index writes are committed in one IndexedDB transaction.
+async function storeArchivedPage(page){
+  const hash=page.imageHash;
+  if(!/^[a-f0-9]{64}$/i.test(hash||''))throw new Error('Missing valid image fingerprint');
+  const recordId=hash+':'+page.id;
+  const storedPage=serializableItem(page,true);
+  const record={schema:'archived-photo-v1',recordId,imageHash:hash,archivedAt:new Date().toISOString(),
+    page:storedPage,document:state.documents.find(d=>d.id===page.documentId)||null,
+    finalTextHash:await sha256Hex(storedPage.finalText||storedPage.text||'')};
+  const db=await openProjectDB();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction([DB_ARCHIVED,DB_PROCESSED],'readwrite');
+    const archive=tx.objectStore(DB_ARCHIVED),index=tx.objectStore(DB_PROCESSED);
+    const req=index.get(hash);
+    req.onsuccess=()=>{
+      const ids=Array.isArray(req.result?.recordIds)?req.result.recordIds:[];
+      archive.put(record,recordId);
+      index.put({schema:'processed-photo-index-v1',imageHash:hash,recordIds:[...new Set([...ids,recordId])],updatedAt:record.archivedAt},hash);
+    };
+    tx.oncomplete=()=>{db.close();resolve(record)};
+    tx.onerror=()=>{db.close();reject(tx.error)};
+    tx.onabort=()=>{db.close();reject(tx.error||new Error('Archive transaction aborted'))};
+  });
+}
+async function archivedMatches(hash){
+  if(!/^[a-f0-9]{64}$/i.test(hash||''))return [];
+  const index=await idbGet(DB_PROCESSED,hash);
+  const matches=[];
+  for(const id of index?.recordIds||[]){
+    const rec=await idbGet(DB_ARCHIVED,id);
+    if(!rec||rec.imageHash!==hash||!rec.page?.imageData)continue;
+    if(await sha256Hex(rec.page.finalText||rec.page.text||'')!==rec.finalTextHash)continue;
+    // Recompute from the saved original image bytes rather than trusting a detached index.
+    const original=dataUrlToFile(rec.page.imageData,rec.page.name);
+    if(await imageHashForFile(original)!==hash)continue;
+    matches.push(rec);
+  }
+  return matches;
+}
+function showSmartReport(id,message){
+  const el=$(id);if(el){el.textContent=message;el.classList.remove('hidden')}
+}
+function restoreArchivedPage(rec){
+  const x=rec.page;
+  if(state.items.some(i=>i.id===x.id))throw new Error('This page is already loaded.');
+  if(!x.imageData)throw new Error('The archived image is unavailable.');
+  let documentId=x.documentId||'';
+  if(documentId&&!state.documents.some(d=>d.id===documentId)){
+    if(rec.document)state.documents.push({...rec.document});
+    else documentId='';
+  }
+  const file=dataUrlToFile(x.imageData,x.name);
+  const item={...x,documentId,file,url:x.imageData,viewMode:'final',
+    editingSnapshotTaken:false,activeAttemptId:'',imageHash:rec.imageHash,
+    order:state.items.length,regions:(x.regions||[]).map(r=>({...r,runningPasses:[]}))};
+  state.items.push(item);
+  normalizeItemOrder();refreshPageNumberSuggestion(item);
+  scheduleAutosave();return item;
 }
 function normalizeSpotCheckLedger(list){
  return Array.isArray(list)?list.filter(x=>x&&x.pageId&&['ok','error'].includes(x.outcome)).map(x=>({...x})):[];
@@ -767,7 +855,7 @@ async function addFiles(list){
      status:'queued',classification:'queued',reason:'Waiting to be processed.',
      text:'',rawText:'',repairedText:'',finalText:'',error:'',repairs:[],validationWarnings:[],validationDetails:[],mathRenderWarnings:[],history:[],reviewFlags:[],
      primaryAttempts:0,secondaryAttempts:0,failures:0,lastError:'',truncated:false,stopReason:'',
-     viewMode:'final',compareOpen:false,editingSnapshotTaken:false,imageHash:'',lastFingerprint:'',lastPromptFingerprint:'',lastBatchId:'',lastAutoFixEnabled:false,lastHighAssurance:false,lastHighAssurancePolicy:'',lastAttemptId:'',
+     viewMode:'final',compareOpen:false,editingSnapshotTaken:false,imageHash:hash,lastFingerprint:'',lastPromptFingerprint:'',lastBatchId:'',lastAutoFixEnabled:false,lastHighAssurance:false,lastHighAssurancePolicy:'',lastAttemptId:'',
      imageRotation:0,imageZoom:1,imageFit:'page',imageReviewMode:'normal',approvalAt:'',needsReapproval:false,
      transientRetries:0,transientErrors:[],retryNotBefore:'',
      documentId:(state.documentFilter!=='all'&&state.documentFilter!=='unfiled')?state.documentFilter:'',
@@ -3480,6 +3568,73 @@ window.exportRegionReviewPackage=async(pageId,regionId)=>{
  downloadBlob('region-review-'+slug(page.name)+'-'+slug(region.note||region.id)+'.zip',await buildArchiveZip(entries));
 };
 $('archive-project').onclick=()=>exportProjectArchive();
+async function beginSmartArchive(){
+  if(state.running||state.queuePlan||state.activeControllers.size){alert('Finish or cancel active processing before archiving.');return}
+  const completed=state.items.filter(i=>i.status==='done'&&i.finalText&&i.imageData);
+  if(!completed.length){alert('No completed pages with original images are available to archive.');return}
+  pendingSmartCleanup=null;$('smart-cleanup').disabled=true;
+  try{
+    const saved=[];
+    for(const page of completed){
+      if(!page.imageHash)page.imageHash=await imageHashForFile(page.file||dataUrlToFile(page.imageData,page.name));
+      if(!page.imageHash)throw new Error('Cannot fingerprint '+page.name);
+      const record=await storeArchivedPage(page);
+      const verified=await archivedMatches(page.imageHash);
+      if(!verified.some(x=>x.recordId===record.recordId))throw new Error('Archive verification failed for '+page.name);
+      saved.push(page.id);
+    }
+    const entries=await archiveEntriesForPages(completed,{includeProject:false});
+    // Include a restorable selected-project snapshot; do not export unrelated active pages.
+    entries.push({name:'project.json',bytes:jsonBytes({...projectEnvelope(true),queue:null,
+      items:completed.map(i=>serializableItem(i,true)),lastBatchSummary:null,spotCheckSession:null,externalImportSession:null})});
+    const blob=await buildArchiveZip(entries);
+    downloadBlob('math-photo-notes-completed-'+new Date().toISOString().slice(0,10)+'.zip',blob);
+    pendingSmartCleanup={ids:saved,snapshot:saved.map(id=>{const i=state.items.find(p=>p.id===id);return {id,imageHash:i.imageHash,finalText:i.finalText,classification:i.classification}})};
+    $('smart-cleanup').disabled=false;
+    showSmartReport('smart-archive-report',saved.length+' completed pages saved and verified in local archive; backup download requested. Confirm you saved the ZIP before cleanup.');
+  }catch(e){
+    pendingSmartCleanup=null;$('smart-cleanup').disabled=true;
+    showSmartReport('smart-archive-report','Archive stopped; nothing removed. '+(e?.message||e));
+  }
+}
+async function finishSmartCleanup(){
+  const pending=pendingSmartCleanup;if(!pending)return;
+  if(state.running||state.queuePlan||state.activeControllers.size){alert('Finish processing before cleanup.');return}
+  if(!confirm('Have you SAVED and located the downloaded ZIP backup? This will remove archived completed pages from the workspace and delete temporary AI response cache. Local archives and review evidence remain.'))return;
+  const ids=new Set(pending.ids);
+  try{
+    for(const snapshot of pending.snapshot){
+      const page=state.items.find(i=>i.id===snapshot.id);
+      if(!page||page.imageHash!==snapshot.imageHash||page.finalText!==snapshot.finalText||page.classification!==snapshot.classification)
+        throw new Error('Page changed since archive; archive again before cleaning.');
+      if(!(await archivedMatches(page.imageHash)).some(r=>r.page.id===page.id))
+        throw new Error('Verified archive no longer available for '+page.name);
+    }
+    // Clear disposable cache first. If that fails, leave the active project untouched.
+    await idbClear(DB_CACHE);
+    const originalItems=state.items;
+    const survivors=originalItems.filter(i=>!ids.has(i.id));
+    // Persist the survivor snapshot before releasing any in-memory original pages.
+    state.items=survivors;
+    normalizeItemOrder();
+    try{await saveProjectState()}catch(e){state.items=originalItems;throw e}
+    originalItems.filter(i=>ids.has(i.id)).forEach(i=>{if(i.url?.startsWith('blob:'))URL.revokeObjectURL(i.url)});
+    state.lastBatchSummary=null;state.spotCheckSession=null;state.externalImportSession=null;
+    pendingSmartCleanup=null;$('smart-cleanup').disabled=true;
+    scheduleAutosave();render();
+    showSmartReport('smart-archive-report','Cleanup complete: '+ids.size+' completed pages removed from workspace; AI response cache cleared; local archives, fingerprints, and reliability evidence retained.');
+  }catch(e){showSmartReport('smart-archive-report','Cleanup stopped; archived data retained. '+(e?.message||e))}
+}
+async function browseSmartArchives(){
+  try{
+    const records=await idbGetAll(DB_ARCHIVED);
+    const approved=records.filter(r=>r.page?.classification==='approved').length;
+    showSmartReport('smart-archive-report',records.length+' archived page records ('+approved+' Approved). Reimport an original photo to restore an unfinished page. Approved exact duplicates are skipped; use Open Project to restore an exported ZIP project.json.');
+  }catch(e){showSmartReport('smart-archive-report','Cannot read archive: '+e.message)}
+}
+$('smart-archive').onclick=()=>beginSmartArchive();
+$('smart-cleanup').onclick=()=>finishSmartCleanup();
+$('smart-archive-browser').onclick=()=>browseSmartArchives();
 $('external-review-export').onclick=()=>exportExternalReviewPackages(null);
 $('external-review-import').onclick=()=>$('external-review-file').click();
 $('external-review-resume').onclick=()=>{if(state.externalImportSession){state.externalImportSession.hidden=false;render();setTimeout(()=>window.scrollTo({top:$('external-review-panel')?.offsetTop||0,behavior:'smooth'}),0)}};
